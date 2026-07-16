@@ -83,6 +83,18 @@ describe("GitHub webhook ingestion", () => {
     await app.close();
   });
 
+  it("accepts a signed GitHub App ping without enqueueing work", async () => {
+    const { app, enqueue } = makeApp();
+    const body = JSON.stringify({ zen: "Keep it logically awesome." });
+
+    const response = await inject(app, body, { "x-github-event": "ping" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ping: true });
+    expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("rejects an invalid signature before enqueueing", async () => {
     const { app, enqueue } = makeApp();
     const response = await inject(app, JSON.stringify(payload()), {

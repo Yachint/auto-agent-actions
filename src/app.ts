@@ -62,6 +62,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
           { signature, event, deliveryId },
           webhook,
         );
+        if ("ping" in result) {
+          request.log.info({ deliveryId, event }, "GitHub webhook ping accepted");
+          return reply.code(200).send(result);
+        }
         request.log.info(
           { deliveryId, event, enqueued: result.enqueued },
           "GitHub webhook accepted",

@@ -7,6 +7,7 @@ This document separates locally verified behavior from checks that require the o
 | Criterion | Evidence |
 | --- | --- |
 | Supported PR webhooks enqueue durable work exactly once | Webhook signature/action/allowlist tests, Redis delivery claims, BullMQ job IDs, and queue idempotency tests |
+| GitHub App connectivity can be verified without queueing review work | Signed `ping` webhooks return 200; invalid signatures still fail closed |
 | New commits supersede old heads without stale publication | Atomic review-state tests and the privileged analysis-to-publication handoff integration test |
 | Invalid signatures, forks, drafts, closed PRs, and repositories outside the allowlist fail closed | Webhook, analysis, publisher, and reconciliation tests |
 | Codex runs non-interactively with trusted model, effort, prompt, instructions, schema, timeout, output limits, and read-only sandbox settings | Runner, prompt, and local workflow tests |
@@ -20,7 +21,7 @@ This document separates locally verified behavior from checks that require the o
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` reported 0 vulnerabilities on 2026-07-16 |
 
-The latest local verification completed with `npm run build` and 108 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
+The latest local verification completed with `npm run build` and 109 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
 
 ## Owner/VPS verification required
 

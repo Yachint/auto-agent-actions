@@ -44,15 +44,18 @@ export async function acceptGitHubWebhook(
   rawBody: Buffer,
   headers: GitHubWebhookHeaders,
   dependencies: WebhookDependencies,
-): Promise<{ enqueued: boolean }> {
+): Promise<{ enqueued: boolean } | { ping: true }> {
   if (!verifyGitHubSignature(rawBody, headers.signature, dependencies.secret)) {
     throw new WebhookRequestError("invalid webhook signature", 401);
   }
-  if (headers.event !== "pull_request") {
-    throw new WebhookRequestError("unsupported GitHub event", 400);
-  }
   if (headers.deliveryId.trim().length === 0) {
     throw new WebhookRequestError("missing GitHub delivery ID", 400);
+  }
+  if (headers.event === "ping") {
+    return Object.freeze({ ping: true as const });
+  }
+  if (headers.event !== "pull_request") {
+    throw new WebhookRequestError("unsupported GitHub event", 400);
   }
 
   const request = parseReviewRequest(rawBody, headers.deliveryId);
