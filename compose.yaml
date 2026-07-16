@@ -54,6 +54,16 @@ services:
       REVIEW_QUEUE_DEBOUNCE_MS: ${REVIEW_QUEUE_DEBOUNCE_MS:-1000}
       GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/github_webhook_secret
     secrets: [github_webhook_secret]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=auto-agent-actions-edge"
+      - "traefik.http.routers.auto-agent-actions.rule=Host(`${WEBHOOK_DOMAIN:?set WEBHOOK_DOMAIN}`) && Path(`/webhooks/github`)"
+      - "traefik.http.routers.auto-agent-actions.entrypoints=websecure"
+      - "traefik.http.routers.auto-agent-actions.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.auto-agent-actions.service=auto-agent-actions"
+      - "traefik.http.routers.auto-agent-actions.middlewares=auto-agent-actions-body-limit"
+      - "traefik.http.middlewares.auto-agent-actions-body-limit.buffering.maxRequestBodyBytes=2097152"
+      - "traefik.http.services.auto-agent-actions.loadbalancer.server.port=3000"
     depends_on:
       redis:
         condition: service_healthy
@@ -132,39 +142,11 @@ services:
     mem_limit: ${ANALYSIS_MEMORY_LIMIT:-4g}
     cpus: ${ANALYSIS_CPU_LIMIT:-2.0}
 
-  caddy:
-    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
-    restart: unless-stopped
-    read_only: true
-    environment:
-      WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN:?set WEBHOOK_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
-    depends_on:
-      server:
-        condition: service_healthy
-    networks: [edge, egress]
-    cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 256m
-    cpus: 0.5
-
 networks:
   backend:
     internal: true
   edge:
+    name: auto-agent-actions-edge
     internal: true
   egress: {}
 
@@ -172,8 +154,6 @@ volumes:
   redis-data:
   review-data:
   token-broker:
-  caddy-data:
-  caddy-config:
 
 secrets:
   github_app_private_key:

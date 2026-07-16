@@ -5,7 +5,6 @@ import { spawnSync } from "node:child_process";
 
 const REQUIRED_VALUES = [
   "WEBHOOK_DOMAIN",
-  "ACME_EMAIL",
   "GITHUB_APP_ID",
   "GITHUB_ALLOWED_REPOSITORIES",
   "CODEX_CLI_VERSION",
@@ -51,11 +50,11 @@ export function validatePreflightEnvironment(environment) {
   if (!/^\d+$/.test(environment.GITHUB_APP_ID) || environment.GITHUB_APP_ID === "0") {
     throw new TypeError("GITHUB_APP_ID must be the created App's positive integer ID");
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9.-]+$/.test(environment.WEBHOOK_DOMAIN)) {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9.-]+$/.test(environment.WEBHOOK_DOMAIN) ||
+    environment.WEBHOOK_DOMAIN.endsWith(".example.com")
+  ) {
     throw new TypeError("WEBHOOK_DOMAIN is invalid");
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(environment.ACME_EMAIL)) {
-    throw new TypeError("ACME_EMAIL is invalid");
   }
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(environment.CODEX_CLI_VERSION) ||

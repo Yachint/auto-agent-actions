@@ -120,10 +120,18 @@ This file is the durable, chronological handoff for future development sessions.
 - Added a multi-stage container build and a five-service Compose topology for Caddy, webhook server, Redis, publisher, and analysis. Services use separate secrets, internal networks, read-only roots, dropped capabilities, no-new-privileges, non-root users, resource limits, Redis AOF/snapshots, and isolated persistent volumes.
 - Only the analysis container mounts the dedicated read-write `CODEX_HOME`; only the publisher mounts the GitHub App private key. The Compose network split limits service reachability, but hostname-level outbound restrictions still require a host firewall or forward proxy.
 - Added `docs/DEPLOYMENT.md` and `.env.vps.example` with credential handling, device-code login, preflight, launch, rotation, persistence, and backup guidance. Docker is unavailable in the development environment, so Compose runtime validation is explicitly deferred to the VPS.
-- Added `docs/ACCEPTANCE.md` mapping every first-release criterion to local evidence and listing the remaining live Docker, GitHub, stale-head, recovery, credential-isolation, and backup checks. The final local build passed with 105 standard tests; the opt-in real broker socket test also passed, Compose security boundaries were machine-checked, and the production npm audit reported zero vulnerabilities.
+- Added `docs/ACCEPTANCE.md` mapping every first-release criterion to local evidence and listing the remaining live Docker, GitHub, stale-head, recovery, credential-isolation, and backup checks. The final local build passed with 106 standard tests; the opt-in real broker socket test also passed, Compose security boundaries were machine-checked, and the production npm audit reported zero vulnerabilities.
 - Added a non-secret VPS preflight command that validates deployment values, protected file metadata, Codex credential ownership, required host tools, and resolved Compose configuration without reading or printing secret contents.
 - Added a current GitHub App setup guide covering private visibility, minimum permissions, the sole pull-request event, webhook security, selected-repository installation, key handling, and delivery verification.
 - The local Codex CLI 0.144.5 exposes every locked-down runner flag. The analysis container build now verifies its pinned CLI version and required flags before producing an image.
+
+## 2026-07-17 — Existing VPS Traefik integration
+
+- The VPS already runs Traefik 3.6.17 with host networking, Docker discovery, `exposedByDefault: false`, the `websecure` entrypoint, and the `letsencrypt` resolver. Caddy was removed from this project's deployment topology.
+- The webhook server now has explicit Traefik labels for an exact `/webhooks/github` route, a 2 MiB request-body limit, and port 3000. It publishes no host port and selects the stable named network `auto-agent-actions-edge`.
+- The Traefik edge network remains `internal: true`. Docker's Linux bridge contract permits direct host-to-container communication on internal networks while denying the container an external route, so host-network Traefik can reach the webhook server without granting it egress.
+- Read-only VPS inspection confirmed Docker Engine 29.5.3, Compose 5.1.4, Linux arm64, 2 CPUs, 11 GiB RAM, 9.2 GiB free disk, and an interactive-shell Codex 0.144.5 ChatGPT login. The repository had not yet been cloned to the VPS.
+- The owner selected `autoreview.yachint.in` as the production webhook hostname.
 
 ## Unresolved decisions
 

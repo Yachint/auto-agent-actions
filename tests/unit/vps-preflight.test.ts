@@ -6,8 +6,7 @@ import {
 } from "../../scripts/vps-preflight.mjs";
 
 const valid = {
-  WEBHOOK_DOMAIN: "reviews.example.com",
-  ACME_EMAIL: "owner@example.com",
+  WEBHOOK_DOMAIN: "autoreview.yachint.in",
   GITHUB_APP_ID: "123456",
   GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/private-project",
   CODEX_CLI_VERSION: "1.2.3",
@@ -31,6 +30,7 @@ describe("VPS preflight configuration", () => {
 
   it.each([
     [{ ...valid, GITHUB_APP_ID: "0" }, /GITHUB_APP_ID/],
+    [{ ...valid, WEBHOOK_DOMAIN: "reviews.example.com" }, /WEBHOOK_DOMAIN/],
     [{ ...valid, CODEX_CLI_VERSION: "0.0.0-replace-me" }, /CODEX_CLI_VERSION/],
     [{ ...valid, GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/project" }, /unique/],
     [{ ...valid, CODEX_CREDENTIALS_DIR: "relative/path" }, /absolute/],

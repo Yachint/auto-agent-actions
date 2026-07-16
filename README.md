@@ -65,7 +65,7 @@ BullMQ uses separate analysis and publication queues. Analysis jobs are coalesce
 
 The first release uses Redis for BullMQ, delivery claims, and operational review state. Production deployment must enable Redis persistence and backups.
 
-The publisher periodically reconciles all open pull requests in allowlisted repositories, so a current head missed during downtime is re-enqueued. The analysis worker removes safely-contained abandoned worktrees older than the configured threshold at startup. Redis-backed counters and queue gauges are available at the internal `/metrics` endpoint; Caddy intentionally does not expose it publicly.
+The publisher periodically reconciles all open pull requests in allowlisted repositories, so a current head missed during downtime is re-enqueued. The analysis worker removes safely-contained abandoned worktrees older than the configured threshold at startup. Redis-backed counters and queue gauges are available at the internal `/metrics` endpoint; the Traefik router exposes only the exact webhook path.
 
 ## Service entry points
 

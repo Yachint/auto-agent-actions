@@ -10,6 +10,7 @@ type Service = {
   cap_drop?: string[];
   security_opt?: string[];
   ports?: string[];
+  labels?: string[];
   networks?: string[];
   secrets?: string[];
   environment?: Record<string, unknown>;
@@ -26,20 +27,29 @@ describe("Compose security boundaries", () => {
       services: Record<string, Service>;
       networks: Record<string, { internal?: boolean }>;
     };
-    const { redis, server, publisher, analysis, caddy } = compose.services;
-    expect(redis && server && publisher && analysis && caddy).toBeTruthy();
+    const { redis, server, publisher, analysis } = compose.services;
+    expect(redis && server && publisher && analysis).toBeTruthy();
+    expect(Object.keys(compose.services).sort()).toEqual([
+      "analysis",
+      "publisher",
+      "redis",
+      "server",
+    ]);
 
     expect(
       Object.entries(compose.services)
         .filter(([, service]) => (service.ports?.length ?? 0) > 0)
         .map(([name]) => name),
-    ).toEqual(["caddy"]);
+    ).toEqual([]);
     expect(server!.networks).toEqual(["backend", "edge"]);
     expect(publisher!.networks).toEqual(["backend", "egress"]);
     expect(analysis!.networks).toEqual(["backend", "egress"]);
     expect(redis!.networks).toEqual(["backend"]);
     expect(compose.networks.backend?.internal).toBe(true);
     expect(compose.networks.edge?.internal).toBe(true);
+    expect(compose.networks.edge).toEqual(
+      expect.objectContaining({ name: "auto-agent-actions-edge" }),
+    );
 
     expect(server!.secrets).toEqual(["github_webhook_secret"]);
     expect(publisher!.secrets).toEqual([
@@ -56,7 +66,7 @@ describe("Compose security boundaries", () => {
     expect(volumeTargets(publisher!)).not.toContain("/var/lib/codex");
     expect(volumeTargets(server!)).not.toContain("/var/lib/codex");
 
-    for (const service of [server!, publisher!, analysis!, caddy!]) {
+    for (const service of [server!, publisher!, analysis!]) {
       expect(service.read_only).toBe(true);
       expect(service.cap_drop).toContain("ALL");
       expect(service.security_opt).toContain("no-new-privileges:true");
@@ -65,11 +75,20 @@ describe("Compose security boundaries", () => {
       expect(service.user).toBe("1000:1000");
     }
     expect(redis!.command).toEqual(expect.arrayContaining(["--appendonly", "yes"]));
-
-    const caddyfile = await readFile(path.join(root, "deploy/Caddyfile"), "utf8");
-    expect(caddyfile).toContain("handle /webhooks/github");
-    expect(caddyfile).not.toContain("/metrics");
-    expect(caddyfile).not.toContain("/health/ready");
+    expect(server!.labels).toEqual(
+      expect.arrayContaining([
+        "traefik.enable=true",
+        "traefik.docker.network=auto-agent-actions-edge",
+        "traefik.http.routers.auto-agent-actions.entrypoints=websecure",
+        "traefik.http.routers.auto-agent-actions.tls.certresolver=letsencrypt",
+        "traefik.http.services.auto-agent-actions.loadbalancer.server.port=3000",
+      ]),
+    );
+    const routerRule = server!.labels?.find((label) => label.includes(".rule="));
+    expect(routerRule).toContain("Path(`/webhooks/github`)");
+    expect(routerRule).not.toContain("PathPrefix");
+    expect(server!.labels?.join("\n")).not.toContain("/metrics");
+    expect(server!.labels?.join("\n")).not.toContain("/health/ready");
   });
 });
 

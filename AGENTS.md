@@ -43,7 +43,7 @@ Keep these trust boundaries explicit:
 - `docs/DEPLOYMENT.md`: hardened Compose topology and VPS operating procedure.
 - `docs/ACCEPTANCE.md`: locally verified criteria and owner/VPS checks still required.
 - `docs/GITHUB_APP_SETUP.md`: exact private App permissions, events, installation scope, and verification sequence.
-- `compose.yaml`, `Dockerfile`, and `deploy/`: isolated service packaging and TLS ingress.
+- `compose.yaml` and `Dockerfile`: isolated service packaging and labels for the VPS's existing host-network Traefik ingress.
 - `MEMORY.md`: chronological decisions, completed work, and unresolved choices.
 
 ## Working conventions

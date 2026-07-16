@@ -17,17 +17,17 @@ This document separates locally verified behavior from checks that require the o
 | Reviews use advisory `COMMENT` only and no safe findings means no post | Publisher tests |
 | Missed webhooks are recovered | Reconciliation processor tests using the same durable queue/state idempotency path |
 | Crashed worktrees are cleaned without path escape | Repository cleanup tests |
-| Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, Compose, and Caddy configuration tests/checks |
+| Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` reported 0 vulnerabilities on 2026-07-16 |
 
-The latest local verification completed with `npm run build` and 105 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
+The latest local verification completed with `npm run build` and 106 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
 
 ## Owner/VPS verification required
 
 1. Run `docker compose --env-file .env.vps config` and build all images on the VPS; Docker is not installed in the development environment.
 2. Authenticate the pinned containerized Codex CLI into the dedicated `CODEX_HOME` and confirm `codex login status` without exposing `auth.json`.
 3. Create and install the private GitHub App on selected repositories with Contents read, Pull requests read/write, Metadata read, and the `pull_request` webhook.
-4. Configure the generated private key and webhook secret, start the stack, and confirm only Caddy publishes host ports.
+4. Configure the generated private key and webhook secret, start the stack, and confirm no project service publishes host ports and Traefik exposes only the exact webhook path.
 5. Deliver a signed test webhook, open a same-repository PR, and verify exactly one correctly anchored `COMMENT` review against the current head.
 6. Push a replacement commit during a deliberately slow review and verify no review is posted for the obsolete SHA.
 7. Stop webhook delivery temporarily, push a commit, restore the stack, and confirm reconciliation recovers the missed head.

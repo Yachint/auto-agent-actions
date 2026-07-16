@@ -4,19 +4,20 @@ This guide prepares the isolated first-release deployment. Use `docs/GITHUB_APP_
 
 ## Security layout
 
-The Compose stack runs five services:
+The Compose stack runs four services behind the VPS's existing host-network Traefik:
 
-- Caddy is the only public service and forwards only `/webhooks/github`.
-- The webhook server can reach only Redis and Caddy's internal edge network. It receives only the webhook secret.
+- The webhook server receives only the webhook secret. It joins Redis's internal backend and a named internal edge network used by Traefik.
 - Redis is reachable only on the internal backend network and persists queue/state data with AOF and snapshots.
 - The analysis worker owns the Codex credential directory and review worktrees. It does not receive the GitHub App private key.
 - The publisher owns the GitHub App private key and brokers allowlisted read tokens to the analysis worker over a shared Unix socket.
+
+No service publishes a host port. The existing Traefik Docker provider discovers only the labeled webhook server, selects `auto-agent-actions-edge`, and routes the exact `/webhooks/github` path through the existing `websecure` entrypoint and `letsencrypt` certificate resolver. Health, readiness, and metrics routes are not exposed. Docker documents that the host can communicate directly with container IPs on an internal network while containers on that network remain externally isolated; this preserves the webhook server's no-egress boundary. See [Docker internal network mode](https://docs.docker.com/reference/cli/docker/network/create/#network-internal-mode---internal).
 
 Both workers need outbound HTTPS: analysis needs GitHub fetch/API access and OpenAI inference; publisher needs GitHub API access. Docker Compose cannot enforce a hostname-level egress allowlist. Before reviewing public repositories, add a host firewall or authenticated forward proxy that restricts these containers to the required GitHub and OpenAI endpoints, then repeat the isolation audit. Forks remain rejected regardless.
 
 ## Host preparation
 
-Install Docker Engine with the Compose plugin, point the webhook hostname to the VPS, and allow inbound TCP 80/443 plus UDP 443 if HTTP/3 is desired. Clone this repository under `/opt/auto-agent-actions` or another root-owned application directory.
+Verify Docker Engine, the Compose plugin, and the host-network Traefik stack are healthy. Point `autoreview.yachint.in` to the VPS. Clone this repository under `/opt/auto-agent-actions` or another root-owned application directory.
 
 Create a deployment environment file:
 
@@ -25,7 +26,7 @@ cp .env.vps.example .env.vps
 chmod 600 .env.vps
 ```
 
-Set `CODEX_CLI_VERSION` to the exact tested CLI version reported by `codex --version`. Keep the Redis and Caddy image versions pinned; after validation, prefer immutable image digests.
+Set `CODEX_CLI_VERSION` to the exact tested CLI version reported by `codex --version`. Keep the Redis image version pinned; after validation, prefer an immutable image digest.
 
 Prepare secret and credential directories. Files containing secrets must be owned by the deployment administrator and mode 0600. The Codex directory must be accessible only to container UID 1000:
 
@@ -71,7 +72,7 @@ docker compose --env-file .env.vps ps
 docker compose --env-file .env.vps logs --tail=100 server analysis publisher
 ```
 
-Confirm the server is healthy from inside its container and that only Caddy publishes host ports. Do not paste logs containing private repository data into public issues.
+Confirm the server is healthy from inside its container, no project service publishes a host port, and Traefik reports a healthy `auto-agent-actions` router/service. Do not paste logs containing private repository data into public issues.
 
 ## Persistence and operations
 

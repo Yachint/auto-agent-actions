@@ -23,7 +23,7 @@ Use TypeScript on Node.js unless the project owner chooses otherwise.
 - Queue: BullMQ with Redis
 - Persistent state: Redis hashes for first-release queue/review lifecycle state; PostgreSQL is deferred until relational history or analytics require it
 - Process management and deployment: Docker Compose
-- Reverse proxy and TLS: Caddy or nginx
+- Reverse proxy and TLS: the VPS's existing host-network Traefik 3 deployment
 - Tests: Vitest
 - Logging: Pino structured JSON logs
 
@@ -355,7 +355,7 @@ Do not log prompts containing sensitive repository information by default. Recor
 - Add resource and network restrictions.
 - Add reconciliation, cleanup, health checks, metrics, and backups.
 
-The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, dropped capabilities, resource limits, TLS ingress, Redis persistence, and an internal metrics endpoint. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
+The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, dropped capabilities, resource limits, exact-path Traefik ingress labels, Redis persistence, and an internal metrics endpoint. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
 
 ## Minimum acceptance criteria
 
