@@ -21,6 +21,7 @@ x-common-environment: &common-environment
 services:
   redis:
     image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    user: "redis:redis"
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "900", "1", "--save", "300", "10"]
     volumes:

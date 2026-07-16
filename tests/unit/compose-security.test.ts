@@ -46,6 +46,7 @@ describe("Compose security boundaries", () => {
     expect(publisher!.networks).toEqual(["backend", "egress"]);
     expect(analysis!.networks).toEqual(["backend", "egress"]);
     expect(redis!.networks).toEqual(["backend"]);
+    expect(redis!.user).toBe("redis:redis");
     expect(compose.networks.backend?.internal).toBe(true);
     expect(compose.networks.edge?.internal).toBe(true);
     expect(compose.networks.edge).toEqual(
