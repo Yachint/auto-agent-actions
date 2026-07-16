@@ -1,0 +1,25 @@
+{
+  "action": "opened",
+  "number": 7,
+  "repository": {
+    "full_name": "example/project",
+    "clone_url": "https://github.com/example/project.git"
+  },
+  "pull_request": {
+    "state": "open",
+    "draft": false,
+    "base": {
+      "ref": "main",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "repo": {
+        "full_name": "example/project"
+      }
+    },
+    "head": {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "repo": {
+        "full_name": "example/project"
+      }
+    }
+  }
+}

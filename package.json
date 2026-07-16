@@ -1,0 +1,40 @@
+{
+  "name": "auto-agent-actions",
+  "version": "1.0.0",
+  "description": "Self-hosted GitHub pull request reviews powered by Codex CLI",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/server.js",
+  "scripts": {
+    "build": "tsc",
+    "postbuild": "node scripts/copy-assets.mjs",
+    "dev": "tsx watch src/server.ts",
+    "dev:analysis-worker": "tsx watch src/analysis-worker.ts",
+    "dev:publisher-worker": "tsx watch src/publisher-worker.ts",
+    "review:fixture": "tsx src/cli/review-fixture.ts",
+    "start": "node dist/src/server.js",
+    "start:analysis-worker": "node dist/src/analysis-worker.js",
+    "start:publisher-worker": "node dist/src/publisher-worker.js",
+    "preflight:vps": "node scripts/vps-preflight.mjs",
+    "verify:codex": "node scripts/verify-codex-cli.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "bullmq": "^5.80.5",
+    "fastify": "^5.10.0",
+    "ioredis": "^5.11.1",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
+  }
+}

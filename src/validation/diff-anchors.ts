@@ -1,0 +1,43 @@
+import { isRangeOnRightSide, type ExactDiff } from "../repositories/diff.js";
+import type { ReviewFinding, ReviewOutput } from "./review-output.js";
+
+export interface RejectedFinding {
+  finding: ReviewFinding;
+  reason: "path-or-line-range-not-in-reviewed-diff";
+}
+
+export interface AnchoredReviewOutput {
+  review: ReviewOutput;
+  rejected: RejectedFinding[];
+}
+
+export function filterFindingsToExactDiff(
+  output: ReviewOutput,
+  diff: ExactDiff,
+): AnchoredReviewOutput {
+  const accepted: ReviewFinding[] = [];
+  const rejected: RejectedFinding[] = [];
+
+  for (const finding of output.findings) {
+    if (
+      isRangeOnRightSide(
+        diff,
+        finding.path,
+        finding.start_line,
+        finding.end_line,
+      )
+    ) {
+      accepted.push(finding);
+    } else {
+      rejected.push({
+        finding,
+        reason: "path-or-line-range-not-in-reviewed-diff",
+      });
+    }
+  }
+
+  return {
+    review: { findings: accepted, summary: output.summary },
+    rejected,
+  };
+}
