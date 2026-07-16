@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 type Service = {
+  build?: { args?: Record<string, string> };
   read_only?: boolean;
   user?: string;
   cap_drop?: string[];
@@ -72,7 +73,13 @@ describe("Compose security boundaries", () => {
       expect(service.security_opt).toContain("no-new-privileges:true");
     }
     for (const service of [server!, publisher!, analysis!]) {
-      expect(service.user).toBe("1000:1000");
+      expect(service.user).toBe("${APP_UID:?set APP_UID}:${APP_GID:?set APP_GID}");
+      expect(service.build?.args).toEqual(
+        expect.objectContaining({
+          APP_UID: "${APP_UID:?set APP_UID}",
+          APP_GID: "${APP_GID:?set APP_GID}",
+        }),
+      );
     }
     expect(redis!.command).toEqual(expect.arrayContaining(["--appendonly", "yes"]));
     expect(server!.labels).toEqual(

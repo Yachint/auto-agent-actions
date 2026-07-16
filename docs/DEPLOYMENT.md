@@ -28,13 +28,16 @@ chmod 600 .env.vps
 
 Set `CODEX_CLI_VERSION` to the exact tested CLI version reported by `codex --version`. Keep the Redis image version pinned; after validation, prefer an immutable image digest.
 
-Prepare secret and credential directories. Files containing secrets must be owned by the deployment administrator and mode 0600. The Codex directory must be accessible only to container UID 1000:
+Set `APP_UID` and `APP_GID` in `.env.vps` to the numeric IDs reported by `id -u` and `id -g` for the deployment administrator. The image builds its unprivileged runtime account with those IDs so file-backed Compose secrets and the Codex credential bind mount remain readable without granting another host account access.
+
+Prepare secret and credential directories. Files containing secrets must use the configured owner/group and mode 0600; the Codex directory must use the same owner/group and mode 0700:
 
 ```bash
-sudo install -d -m 0700 /opt/auto-agent-actions/secrets
-sudo install -d -m 0700 -o 1000 -g 1000 /opt/auto-agent-actions/codex-home
+sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /opt/auto-agent-actions/secrets
+sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /opt/auto-agent-actions/codex-home
 openssl rand -hex 32 | sudo tee /opt/auto-agent-actions/secrets/read-token-broker-secret >/dev/null
-sudo chmod 600 /opt/auto-agent-actions/secrets/read-token-broker-secret
+sudo chown "$(id -u):$(id -g)" /opt/auto-agent-actions/secrets/read-token-broker-secret
+sudo chmod 0600 /opt/auto-agent-actions/secrets/read-token-broker-secret
 ```
 
 The official Codex documentation says cached credentials live under `CODEX_HOME` (by default `~/.codex`) in `auth.json` or an OS credential store, and file-based `auth.json` must be treated like a password. This deployment mounts the dedicated Codex directory read-write into only the analysis container so ChatGPT tokens can refresh. See [OpenAI authentication and credential storage](https://learn.chatgpt.com/docs/auth#credential-storage).

@@ -8,6 +8,8 @@ const REQUIRED_VALUES = [
   "GITHUB_APP_ID",
   "GITHUB_ALLOWED_REPOSITORIES",
   "CODEX_CLI_VERSION",
+  "APP_UID",
+  "APP_GID",
 ];
 const REQUIRED_PATHS = [
   "GITHUB_APP_PRIVATE_KEY_HOST_FILE",
@@ -62,6 +64,15 @@ export function validatePreflightEnvironment(environment) {
   ) {
     throw new TypeError("CODEX_CLI_VERSION must be an exact installed version");
   }
+  for (const name of ["APP_UID", "APP_GID"]) {
+    if (!/^[1-9]\d{0,9}$/.test(environment[name])) {
+      throw new TypeError(`${name} must be a positive numeric ID`);
+    }
+    const numericId = Number(environment[name]);
+    if (!Number.isSafeInteger(numericId) || numericId > 2_147_483_647) {
+      throw new TypeError(`${name} is outside the supported numeric ID range`);
+    }
+  }
   const repositories = environment.GITHUB_ALLOWED_REPOSITORIES.split(",").map((value) => value.trim());
   if (
     repositories.some(
@@ -102,20 +113,29 @@ async function main() {
   );
   pass("deployment environment is structurally valid");
 
-  await inspectProtectedPath(environment.GITHUB_APP_PRIVATE_KEY_HOST_FILE, "file", 100);
-  await inspectProtectedPath(environment.GITHUB_WEBHOOK_SECRET_HOST_FILE, "file", 32);
-  await inspectProtectedPath(environment.READ_TOKEN_BROKER_SECRET_HOST_FILE, "file", 32);
+  const expectedUid = Number(environment.APP_UID);
+  const expectedGid = Number(environment.APP_GID);
+  const protectedFiles = [
+    await inspectProtectedPath(environment.GITHUB_APP_PRIVATE_KEY_HOST_FILE, "file", 100),
+    await inspectProtectedPath(environment.GITHUB_WEBHOOK_SECRET_HOST_FILE, "file", 32),
+    await inspectProtectedPath(environment.READ_TOKEN_BROKER_SECRET_HOST_FILE, "file", 32),
+  ];
+  for (const metadata of protectedFiles) {
+    if (metadata.uid !== expectedUid || metadata.gid !== expectedGid) {
+      throw new TypeError("secret file ownership must match APP_UID and APP_GID");
+    }
+  }
   const codexDirectory = await inspectProtectedPath(environment.CODEX_CREDENTIALS_DIR, "directory");
-  if (codexDirectory.uid !== 1000) {
-    throw new TypeError("Codex credential directory must be owned by container UID 1000");
+  if (codexDirectory.uid !== expectedUid || codexDirectory.gid !== expectedGid) {
+    throw new TypeError("Codex credential directory ownership must match APP_UID and APP_GID");
   }
   const codexAuth = await inspectProtectedPath(
     path.join(environment.CODEX_CREDENTIALS_DIR, "auth.json"),
     "file",
     20,
   );
-  if (codexAuth.uid !== 1000) {
-    throw new TypeError("Codex auth.json must be owned by container UID 1000");
+  if (codexAuth.uid !== expectedUid || codexAuth.gid !== expectedGid) {
+    throw new TypeError("Codex auth.json ownership must match APP_UID and APP_GID");
   }
   pass("secret paths and Codex credential metadata are protected");
 

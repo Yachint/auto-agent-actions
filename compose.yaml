@@ -7,7 +7,7 @@ x-app-security: &app-security
   cap_drop: [ALL]
   security_opt:
     - no-new-privileges:true
-  user: "1000:1000"
+  user: "${APP_UID:?set APP_UID}:${APP_GID:?set APP_GID}"
   tmpfs:
     - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
 
@@ -46,6 +46,9 @@ services:
     build:
       context: .
       target: app-runtime
+      args:
+        APP_UID: ${APP_UID:?set APP_UID}
+        APP_GID: ${APP_GID:?set APP_GID}
     command: ["node", "dist/src/server.js"]
     environment:
       <<: *common-environment
@@ -82,6 +85,9 @@ services:
     build:
       context: .
       target: app-runtime
+      args:
+        APP_UID: ${APP_UID:?set APP_UID}
+        APP_GID: ${APP_GID:?set APP_GID}
     command: ["node", "dist/src/publisher-worker.js"]
     environment:
       <<: *common-environment
@@ -110,6 +116,8 @@ services:
       context: .
       target: analysis-runtime
       args:
+        APP_UID: ${APP_UID:?set APP_UID}
+        APP_GID: ${APP_GID:?set APP_GID}
         CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:?set CODEX_CLI_VERSION}
     command: ["node", "dist/src/analysis-worker.js"]
     environment:

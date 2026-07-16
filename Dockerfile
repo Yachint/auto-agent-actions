@@ -15,12 +15,17 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 FROM node:24-bookworm-slim AS app-runtime
+ARG APP_UID=1000
+ARG APP_GID=1000
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
-RUN mkdir -p /run/auto-agent-actions /var/lib/auto-agent-actions \
+RUN groupmod --gid "$APP_GID" node \
+  && usermod --uid "$APP_UID" --gid "$APP_GID" node \
+  && mkdir -p /run/auto-agent-actions /var/lib/auto-agent-actions \
+  && chown -R node:node /home/node \
   && chown -R node:node /run/auto-agent-actions /var/lib/auto-agent-actions
 USER node
 CMD ["node", "dist/src/server.js"]

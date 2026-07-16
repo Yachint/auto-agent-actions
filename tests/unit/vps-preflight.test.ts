@@ -10,6 +10,8 @@ const valid = {
   GITHUB_APP_ID: "123456",
   GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/private-project",
   CODEX_CLI_VERSION: "1.2.3",
+  APP_UID: "1002",
+  APP_GID: "1002",
   GITHUB_APP_PRIVATE_KEY_HOST_FILE: "/opt/app/secrets/app.pem",
   GITHUB_WEBHOOK_SECRET_HOST_FILE: "/opt/app/secrets/webhook",
   READ_TOKEN_BROKER_SECRET_HOST_FILE: "/opt/app/secrets/broker",
@@ -32,6 +34,8 @@ describe("VPS preflight configuration", () => {
     [{ ...valid, GITHUB_APP_ID: "0" }, /GITHUB_APP_ID/],
     [{ ...valid, WEBHOOK_DOMAIN: "reviews.example.com" }, /WEBHOOK_DOMAIN/],
     [{ ...valid, CODEX_CLI_VERSION: "0.0.0-replace-me" }, /CODEX_CLI_VERSION/],
+    [{ ...valid, APP_UID: "0" }, /APP_UID/],
+    [{ ...valid, APP_GID: "group" }, /APP_GID/],
     [{ ...valid, GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/project" }, /unique/],
     [{ ...valid, CODEX_CREDENTIALS_DIR: "relative/path" }, /absolute/],
   ])("rejects unsafe or placeholder deployment values", (environment, message) => {

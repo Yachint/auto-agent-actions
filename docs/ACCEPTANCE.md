@@ -20,7 +20,7 @@ This document separates locally verified behavior from checks that require the o
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` reported 0 vulnerabilities on 2026-07-16 |
 
-The latest local verification completed with `npm run build` and 106 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
+The latest local verification completed with `npm run build` and 108 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed.
 
 ## Owner/VPS verification required
 
