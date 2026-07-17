@@ -197,6 +197,7 @@ Define a strict JSON Schema with no additional properties. Suggested shape:
 
 ```json
 {
+  "status": "completed",
   "findings": [
     {
       "title": "Short actionable title",
@@ -212,7 +213,7 @@ Define a strict JSON Schema with no additional properties. Suggested shape:
 }
 ```
 
-Priority should be constrained to an explicitly documented scale, for example P0 through P3. Confidence must be between 0 and 1.
+Priority should be constrained to an explicitly documented scale, for example P0 through P3. Confidence must be between 0 and 1. If the exact diff cannot be inspected reliably, output `status: "blocked"`, an empty findings array, and a non-empty `blocked_reason`; blocked output must fail the analysis job and must never reach publication.
 
 ## Result validation
 
@@ -355,7 +356,7 @@ Do not log prompts containing sensitive repository information by default. Recor
 - Add resource and network restrictions.
 - Add reconciliation, cleanup, health checks, metrics, and backups.
 
-The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, dropped capabilities, resource limits, exact-path Traefik ingress labels, Redis persistence, and an internal metrics endpoint. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
+The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, resource limits, exact-path Traefik ingress labels, Redis persistence, and an internal metrics endpoint. Capabilities remain dropped for every service except the analysis container's documented Bubblewrap namespace requirements; a startup smoke test prevents job consumption if the inner read-only sandbox is unavailable. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
 
 ## Minimum acceptance criteria
 
@@ -368,7 +369,8 @@ The checked-in Compose topology implements separate secrets and process boundari
 - The Codex process has no GitHub write credential.
 - Invalid paths and line ranges are never published.
 - A valid finding appears on the correct changed line in GitHub.
-- No finding results in no bot comment by default.
+- A completed no-finding review produces one summary-only advisory comment.
+- A blocked or incomplete inspection produces no review and fails closed.
 - A scheduled reconciliation recovers a deliberately missed webhook.
 - Secrets never appear in application or Codex logs.
 

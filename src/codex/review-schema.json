@@ -4,8 +4,13 @@
   "title": "Codex pull request review output",
   "type": "object",
   "additionalProperties": false,
-  "required": ["findings", "summary"],
+  "required": ["status", "findings", "summary"],
   "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "blocked"],
+      "description": "Use completed only after the exact diff was inspected; otherwise use blocked."
+    },
     "findings": {
       "type": "array",
       "items": {
@@ -40,6 +45,7 @@
         }
       }
     },
-    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 }
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "blocked_reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
   }
 }

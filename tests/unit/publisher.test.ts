@@ -48,7 +48,7 @@ describe("GitHub review publisher", () => {
         pullRequestNumber: 7,
         reviewedHeadSha: headSha,
         exactDiff: diff,
-        output: { findings: [finding()], summary: "One issue." },
+        output: { status: "completed", findings: [finding()], summary: "One issue." },
       }),
     ).resolves.toEqual({ status: "published", reviewId: 42, comments: 1 });
     expect(github.createReview).toHaveBeenCalledWith({
@@ -77,7 +77,7 @@ describe("GitHub review publisher", () => {
         pullRequestNumber: 7,
         reviewedHeadSha: headSha,
         exactDiff: diff,
-        output: { findings: [finding()], summary: "One issue." },
+        output: { status: "completed", findings: [finding()], summary: "One issue." },
       }),
     ).resolves.toEqual({ status: "stale", currentHeadSha: newerHeadSha });
     expect(github.createReview).not.toHaveBeenCalled();
@@ -93,6 +93,7 @@ describe("GitHub review publisher", () => {
         reviewedHeadSha: headSha,
         exactDiff: diff,
         output: {
+          status: "completed",
           findings: [finding({ path: "outside.ts" }), finding({ confidence: 0.2 })],
           summary: "No publishable issues.",
         },
@@ -112,6 +113,7 @@ describe("GitHub review publisher", () => {
         reviewedHeadSha: headSha,
         exactDiff: diff,
         output: {
+          status: "completed",
           findings: [],
           summary: "Reviewed the worker shutdown changes and error-handling flow.",
         },
@@ -151,7 +153,7 @@ describe("GitHub review publisher", () => {
         pullRequestNumber: 7,
         reviewedHeadSha: headSha,
         exactDiff: diff,
-        output: { findings: [finding()], summary: "One issue." },
+        output: { status: "completed", findings: [finding()], summary: "One issue." },
       });
       expect(result).toEqual({ status: "ineligible", reason: expected });
       expect(github.createReview).not.toHaveBeenCalled();

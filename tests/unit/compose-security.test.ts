@@ -9,6 +9,7 @@ type Service = {
   read_only?: boolean;
   user?: string;
   cap_drop?: string[];
+  cap_add?: string[];
   security_opt?: string[];
   ports?: string[];
   labels?: string[];
@@ -73,6 +74,23 @@ describe("Compose security boundaries", () => {
       expect(service.cap_drop).toContain("ALL");
       expect(service.security_opt).toContain("no-new-privileges:true");
     }
+    expect(analysis!.cap_add).toEqual([
+      "SYS_ADMIN",
+      "SYS_CHROOT",
+      "SETUID",
+      "SETGID",
+    ]);
+    expect(analysis!.security_opt).toEqual(
+      expect.arrayContaining([
+        "no-new-privileges:true",
+        "seccomp=unconfined",
+        "apparmor=unconfined",
+      ]),
+    );
+    expect(server!.cap_add).toBeUndefined();
+    expect(publisher!.cap_add).toBeUndefined();
+    expect(server!.security_opt).not.toContain("seccomp=unconfined");
+    expect(publisher!.security_opt).not.toContain("seccomp=unconfined");
     for (const service of [server!, publisher!, analysis!]) {
       expect(service.user).toBe("${APP_UID:?set APP_UID}:${APP_GID:?set APP_GID}");
       expect(service.build?.args).toEqual(

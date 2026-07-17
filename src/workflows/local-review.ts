@@ -2,7 +2,7 @@ import type { ReasoningEffort } from "../codex/runner.js";
 import {
   parsePullRequestFixture,
 } from "../github/pull-request-fixture.js";
-import type { ReviewOutput } from "../validation/review-output.js";
+import type { CompletedReviewOutput } from "../validation/review-output.js";
 import {
   runReviewCore,
   type ReviewCoreDependencies,
@@ -26,7 +26,7 @@ export interface LocalReviewResult {
   pull_request_number: number;
   base_sha: string;
   head_sha: string;
-  review: ReviewOutput;
+  review: CompletedReviewOutput;
   rejected_findings: Array<{
     title: string;
     path: string;

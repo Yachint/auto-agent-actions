@@ -4,13 +4,16 @@ import path from "node:path";
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
 import type { ExactDiff } from "../repositories/diff.js";
-import { validateReviewOutput, type ReviewOutput } from "../validation/review-output.js";
+import {
+  validateCompletedReviewOutput,
+  type CompletedReviewOutput,
+} from "../validation/review-output.js";
 import { validateQueuedReviewRequest, type ReviewRequest } from "./review-queue.js";
 
 export interface PublicationRequest {
   readonly reviewRequest: ReviewRequest;
   readonly exactDiff: ExactDiff;
-  readonly output: ReviewOutput;
+  readonly output: CompletedReviewOutput;
 }
 
 export interface PublicationQueue {
@@ -78,7 +81,7 @@ export function validatePublicationRequest(value: unknown): PublicationRequest {
   }
   const reviewRequest = validateQueuedReviewRequest(payload.reviewRequest);
   const exactDiff = validateExactDiff(payload.exactDiff, reviewRequest.headSha);
-  const output = validateReviewOutput(payload.output);
+  const output = validateCompletedReviewOutput(payload.output);
   return Object.freeze({ reviewRequest, exactDiff, output });
 }
 

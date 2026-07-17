@@ -21,6 +21,7 @@ GitHub describes `opened`, `reopened`, `synchronize`, and `ready_for_review` as 
 - If publishable findings exist, the App posts one advisory `COMMENT` review with validated inline comments and a summary.
 - If no actionable findings are returned, the App still posts a summary-only `COMMENT` stating that the review completed, that no actionable issues were found, and what areas were reviewed.
 - If candidate findings exist but none meet the configured confidence threshold, the summary-only comment says that no findings met the publication threshold.
+- If Codex cannot inspect the exact diff, it returns a blocked result. The analysis job fails and no review is published; a blocked inspection is never described as “no issues found.”
 - Closed, draft, forked, or stale-head results never post. A stale result schedules the newest head instead.
 
 Summary-only comments are enabled by default with `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=true`. Redis head-SHA state prevents reconciliation or redelivery from posting the same review repeatedly for an unchanged head.

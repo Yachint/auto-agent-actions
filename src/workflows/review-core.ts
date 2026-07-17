@@ -14,7 +14,7 @@ import {
   type GitHubFetchAuthentication,
 } from "../repositories/manager.js";
 import { filterFindingsToExactDiff, type RejectedFinding } from "../validation/diff-anchors.js";
-import type { ReviewOutput } from "../validation/review-output.js";
+import type { CompletedReviewOutput } from "../validation/review-output.js";
 
 export interface ReviewCoreOptions {
   repository: string;
@@ -38,14 +38,14 @@ export interface ReviewCoreResult {
   baseSha: string;
   headSha: string;
   exactDiff: ExactDiff;
-  review: ReviewOutput;
+  review: CompletedReviewOutput;
   rejectedFindings: RejectedFinding[];
 }
 
 export interface ReviewCoreDependencies {
   repositoryManager?: RepositoryManager;
   diffInspector?: DiffInspector;
-  runCodex?: (options: CodexRunnerOptions) => Promise<ReviewOutput>;
+  runCodex?: (options: CodexRunnerOptions) => Promise<CompletedReviewOutput>;
 }
 
 export async function runReviewCore(

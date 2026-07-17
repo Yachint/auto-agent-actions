@@ -114,6 +114,14 @@ services:
 
   analysis:
     <<: *app-security
+    # Codex creates a nested Bubblewrap sandbox for repository-controlled data.
+    # These relaxations apply only to this container; the startup smoke test
+    # refuses to consume jobs unless the inner read-only sandbox actually works.
+    cap_add: [SYS_ADMIN, SYS_CHROOT, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=unconfined
     build:
       context: .
       target: analysis-runtime

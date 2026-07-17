@@ -143,6 +143,7 @@ describe("repository manager and exact diff inspection", () => {
       };
       const filtered = filterFindingsToExactDiff(
         {
+          status: "completed",
           findings: [
             validFinding,
             { ...validFinding, start_line: 3, end_line: 3 },

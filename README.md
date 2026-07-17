@@ -59,6 +59,8 @@ See [`docs/REVIEW_TRIGGERS.md`](docs/REVIEW_TRIGGERS.md) for the exact events th
 
 The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. It publishes only `COMMENT` reviews against the exact reviewed commit. By default, a successful review with no publishable inline findings still posts a summary-only COMMENT so the reviewed outcome is visible; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
 
+Codex output explicitly distinguishes a completed review from a blocked inspection. Blocked output fails the analysis job and cannot enter the publication queue. On Linux deployments, the analysis worker also runs a real read-only sandbox smoke test before consuming jobs, preventing filesystem-sandbox failures from being mislabeled as successful no-finding reviews.
+
 The GitHub App private key exists only in the publisher process. The analysis worker requests a short-lived repository-read token over an authenticated, mode-0600 Unix socket; the broker enforces the repository allowlist and cannot issue a write token through that route. Git receives the read token through a temporary askpass environment, never through a remote URL, command argument, Git configuration, or persistent credential file. Publisher tokens are separately scoped to `pull_requests: write`.
 
 ## Queue status

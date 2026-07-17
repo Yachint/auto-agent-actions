@@ -1,5 +1,5 @@
 import { isRangeOnRightSide, type ExactDiff } from "../repositories/diff.js";
-import type { ReviewFinding, ReviewOutput } from "./review-output.js";
+import type { CompletedReviewOutput, ReviewFinding } from "./review-output.js";
 
 export interface RejectedFinding {
   finding: ReviewFinding;
@@ -7,12 +7,12 @@ export interface RejectedFinding {
 }
 
 export interface AnchoredReviewOutput {
-  review: ReviewOutput;
+  review: CompletedReviewOutput;
   rejected: RejectedFinding[];
 }
 
 export function filterFindingsToExactDiff(
-  output: ReviewOutput,
+  output: CompletedReviewOutput,
   diff: ExactDiff,
 ): AnchoredReviewOutput {
   const accepted: ReviewFinding[] = [];
@@ -37,7 +37,7 @@ export function filterFindingsToExactDiff(
   }
 
   return {
-    review: { findings: accepted, summary: output.summary },
+    review: { status: "completed", findings: accepted, summary: output.summary },
     rejected,
   };
 }

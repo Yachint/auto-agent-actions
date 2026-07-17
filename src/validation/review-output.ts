@@ -13,10 +13,21 @@ export interface ReviewFinding {
   end_line: number;
 }
 
-export interface ReviewOutput {
+interface ReviewOutputBase {
   findings: ReviewFinding[];
   summary: string;
 }
+
+export interface CompletedReviewOutput extends ReviewOutputBase {
+  status: "completed";
+}
+
+export interface BlockedReviewOutput extends ReviewOutputBase {
+  status: "blocked";
+  blocked_reason: string;
+}
+
+export type ReviewOutput = CompletedReviewOutput | BlockedReviewOutput;
 
 export interface ValidationIssue {
   location: string;
@@ -66,11 +77,46 @@ export function validateReviewOutput(value: unknown): ReviewOutput {
       message: "must contain non-whitespace text",
     });
   }
+  if (value.status === "blocked") {
+    const blockedReason = (value as { blocked_reason?: unknown }).blocked_reason;
+    if (value.findings.length > 0) {
+      semanticIssues.push({
+        location: "/findings",
+        message: "must be empty when review status is blocked",
+      });
+    }
+    if (typeof blockedReason !== "string") {
+      semanticIssues.push({
+        location: "/blocked_reason",
+        message: "is required when review status is blocked",
+      });
+    } else if (blockedReason.trim().length === 0) {
+      semanticIssues.push({
+        location: "/blocked_reason",
+        message: "must contain non-whitespace text",
+      });
+    }
+  } else if ("blocked_reason" in value) {
+    semanticIssues.push({
+      location: "/blocked_reason",
+      message: "must be omitted when review status is completed",
+    });
+  }
   if (semanticIssues.length > 0) {
     throw new ReviewOutputValidationError(semanticIssues);
   }
 
   return value;
+}
+
+export function validateCompletedReviewOutput(value: unknown): CompletedReviewOutput {
+  const output = validateReviewOutput(value);
+  if (output.status !== "completed") {
+    throw new ReviewOutputValidationError([
+      { location: "/status", message: "must be completed before publication" },
+    ]);
+  }
+  return output;
 }
 
 function validateFinding(

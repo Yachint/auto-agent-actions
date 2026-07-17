@@ -35,7 +35,7 @@ USER root
 ARG CODEX_CLI_VERSION
 RUN test -n "$CODEX_CLI_VERSION" \
   && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
+  && apt-get install -y --no-install-recommends bubblewrap ca-certificates git \
   && npm install --global "@openai/codex@${CODEX_CLI_VERSION}" \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /root/.npm

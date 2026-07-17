@@ -28,6 +28,7 @@ const valid = {
     ],
   },
   output: {
+    status: "completed" as const,
     findings: [
       {
         title: "Finding",
@@ -84,5 +85,19 @@ describe("publication queue", () => {
         },
       }),
     ).toThrow(/previousPath is invalid/);
+  });
+
+  it("rejects a blocked review at the persisted publication boundary", () => {
+    expect(() =>
+      validatePublicationRequest({
+        ...valid,
+        output: {
+          status: "blocked",
+          findings: [],
+          summary: "The review could not be completed.",
+          blocked_reason: "The filesystem sandbox was unavailable.",
+        },
+      }),
+    ).toThrow(/must be completed before publication/);
   });
 });

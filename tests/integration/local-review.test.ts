@@ -44,6 +44,7 @@ describe("local review workflow", () => {
           expect(path.relative(worktreePath, options.schemaPath)).toMatch(/^\.\./);
 
           return {
+            status: "completed",
             findings: [
               {
                 title: "Changed line finding",
@@ -76,6 +77,7 @@ describe("local review workflow", () => {
       base_sha: fixture.baseSha,
       head_sha: fixture.headSha,
       review: {
+        status: "completed",
         findings: [
           expect.objectContaining({
             title: "Changed line finding",

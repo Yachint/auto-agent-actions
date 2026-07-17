@@ -35,6 +35,7 @@ const exactDiff = {
   ],
 };
 const output = {
+  status: "completed" as const,
   findings: [
     {
       title: "Handle failure",

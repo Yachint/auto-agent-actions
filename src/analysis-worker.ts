@@ -2,6 +2,7 @@ import { createIORedisClient, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { pino } from "pino";
 
+import { verifyCodexReadOnlySandbox } from "./codex/runner.js";
 import { loadAnalysisWorkerConfig } from "./config/runtime.js";
 import { ReadTokenBrokerClient } from "./github/read-token-broker.js";
 import { RedisOperationalMetrics } from "./observability/metrics.js";
@@ -14,6 +15,11 @@ import { AnalysisJobProcessor } from "./workflows/analysis-job.js";
 
 const config = await loadAnalysisWorkerConfig();
 const logger = pino({ level: config.logLevel });
+await verifyCodexReadOnlySandbox({
+  codexBinary: config.codexBinary,
+  environment: process.env,
+});
+logger.info("Codex read-only sandbox preflight passed");
 const redis = new Redis(config.redisUrl, {
   lazyConnect: true,
   maxRetriesPerRequest: null,

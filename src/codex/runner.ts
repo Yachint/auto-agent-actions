@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   parseReviewOutput,
-  type ReviewOutput,
+  type CompletedReviewOutput,
 } from "../validation/review-output.js";
 
 const DEFAULT_MAX_PROCESS_OUTPUT_BYTES = 256 * 1024;
@@ -33,6 +33,13 @@ export interface CodexRunnerOptions {
   executor?: ProcessExecutor;
   maxProcessOutputBytes?: number;
   maxReviewOutputBytes?: number;
+}
+
+export interface CodexSandboxPreflightOptions {
+  codexBinary?: string;
+  environment?: NodeJS.ProcessEnv;
+  executor?: ProcessExecutor;
+  timeoutMs?: number;
 }
 
 export interface ProcessInvocation {
@@ -77,7 +84,7 @@ export class CodexExecutionError extends Error {
 
 export async function runCodexReview(
   options: CodexRunnerOptions,
-): Promise<ReviewOutput> {
+): Promise<CompletedReviewOutput> {
   validateOptions(options);
   await assertTrustedPaths(options);
 
@@ -133,7 +140,41 @@ export async function runCodexReview(
     );
   }
 
-  return parseReviewOutput(await readFile(options.outputPath, "utf8"));
+  const output = parseReviewOutput(await readFile(options.outputPath, "utf8"));
+  if (output.status !== "completed") {
+    throw new CodexExecutionError("Codex could not complete the requested review");
+  }
+  return output;
+}
+
+export async function verifyCodexReadOnlySandbox(
+  options: CodexSandboxPreflightOptions = {},
+): Promise<void> {
+  const executor = options.executor ?? executeProcess;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const result = await executor({
+    command: options.codexBinary ?? "codex",
+    args: [
+      "sandbox",
+      "-c",
+      'sandbox_mode="read-only"',
+      "--",
+      "/bin/true",
+    ],
+    stdin: "",
+    environment: createCodexEnvironment(options.environment ?? process.env),
+    timeoutMs,
+    maxOutputBytes: 64 * 1024,
+  });
+
+  if (
+    result.exitCode !== 0 ||
+    result.signal !== null ||
+    result.timedOut ||
+    result.outputLimitExceeded
+  ) {
+    throw new CodexExecutionError("Codex read-only sandbox preflight failed", result);
+  }
 }
 
 export function buildCodexArgs(

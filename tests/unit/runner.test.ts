@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CodexExecutionError,
   runCodexReview,
+  verifyCodexReadOnlySandbox,
   type ProcessExecutor,
   type ProcessInvocation,
   type ProcessResult,
@@ -30,7 +31,7 @@ describe("Codex review runner", () => {
       capturedInvocation = invocation;
       await writeFile(
         fixture.outputPath,
-        JSON.stringify({ findings: [], summary: "No findings." }),
+        JSON.stringify({ status: "completed", findings: [], summary: "No findings." }),
       );
       return successfulResult();
     };
@@ -50,7 +51,7 @@ describe("Codex review runner", () => {
       },
     });
 
-    expect(review).toEqual({ findings: [], summary: "No findings." });
+    expect(review).toEqual({ status: "completed", findings: [], summary: "No findings." });
     expect(capturedInvocation).toBeDefined();
     expect(capturedInvocation?.stdin).toBe("Trusted review prompt");
     expect(capturedInvocation?.args.at(-1)).toBe("-");
@@ -76,7 +77,7 @@ describe("Codex review runner", () => {
     const fixture = await createFixture();
     await writeFile(
       fixture.outputPath,
-      JSON.stringify({ findings: [], summary: "Stale output" }),
+      JSON.stringify({ status: "completed", findings: [], summary: "Stale output" }),
     );
 
     await expect(
@@ -109,6 +110,65 @@ describe("Codex review runner", () => {
         }),
       }),
     ).rejects.toThrow(CodexExecutionError);
+  });
+
+  it("fails closed when Codex reports that repository inspection was blocked", async () => {
+    const fixture = await createFixture();
+    await expect(
+      runCodexReview({
+        ...fixture,
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        prompt: "Trusted review prompt",
+        timeoutMs: 60_000,
+        executor: async () => {
+          await writeFile(
+            fixture.outputPath,
+            JSON.stringify({
+              status: "blocked",
+              findings: [],
+              summary: "The review could not be completed.",
+              blocked_reason: "The filesystem sandbox was unavailable.",
+            }),
+          );
+          return successfulResult();
+        },
+      }),
+    ).rejects.toThrow(/could not complete/);
+  });
+
+  it("runs a real Codex read-only sandbox smoke command before worker startup", async () => {
+    let capturedInvocation: ProcessInvocation | undefined;
+    await verifyCodexReadOnlySandbox({
+      codexBinary: "codex-test",
+      environment: { PATH: "/usr/bin", GITHUB_TOKEN: "must-not-leak" },
+      executor: async (invocation) => {
+        capturedInvocation = invocation;
+        return successfulResult();
+      },
+    });
+
+    expect(capturedInvocation).toEqual(
+      expect.objectContaining({
+        command: "codex-test",
+        args: [
+          "sandbox",
+          "-c",
+          'sandbox_mode="read-only"',
+          "--",
+          "/bin/true",
+        ],
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+  });
+
+  it("rejects worker startup when the Codex read-only sandbox is unavailable", async () => {
+    await expect(
+      verifyCodexReadOnlySandbox({
+        executor: async () => ({ ...successfulResult(), exitCode: 1 }),
+      }),
+    ).rejects.toThrow(/sandbox preflight failed/);
   });
 
   it("requires trusted artifacts and output to be outside the worktree", async () => {

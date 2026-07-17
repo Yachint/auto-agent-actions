@@ -1,9 +1,9 @@
 import type { ExactDiff } from "../repositories/diff.js";
 import { filterFindingsToExactDiff } from "../validation/diff-anchors.js";
 import {
-  validateReviewOutput,
+  validateCompletedReviewOutput,
+  type CompletedReviewOutput,
   type ReviewFinding,
-  type ReviewOutput,
 } from "../validation/review-output.js";
 import type { GitHubReviewClient, GitHubReviewComment } from "./client.js";
 
@@ -14,7 +14,7 @@ export interface PublishReviewInput {
   readonly pullRequestNumber: number;
   readonly reviewedHeadSha: string;
   readonly exactDiff: ExactDiff;
-  readonly output: ReviewOutput;
+  readonly output: CompletedReviewOutput;
 }
 
 export interface PublisherOptions {
@@ -50,7 +50,7 @@ export class GitHubReviewPublisher {
 
   async publish(input: PublishReviewInput): Promise<PublishReviewResult> {
     validateInput(input);
-    const validated = validateReviewOutput(input.output);
+    const validated = validateCompletedReviewOutput(input.output);
     const anchored = filterFindingsToExactDiff(validated, input.exactDiff);
     const findings = anchored.review.findings.filter(
       (finding) => finding.confidence >= this.#minimumConfidence,

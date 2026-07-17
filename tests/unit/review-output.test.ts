@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   parseReviewOutput,
   ReviewOutputValidationError,
+  validateCompletedReviewOutput,
   validateReviewOutput,
 } from "../../src/validation/review-output.js";
 
 const validOutput = {
+  status: "completed" as const,
   findings: [
     {
       title: "Handle the failed request",
@@ -83,5 +85,42 @@ describe("review output validation", () => {
     expect(() =>
       validateReviewOutput({ ...validOutput, summary: "   " }),
     ).toThrow(/non-whitespace text/);
+  });
+
+  it("accepts a well-formed blocked result but rejects it for publication", () => {
+    const blocked = {
+      status: "blocked",
+      findings: [],
+      summary: "The review could not be completed.",
+      blocked_reason: "The filesystem sandbox was unavailable.",
+    };
+    expect(validateReviewOutput(blocked)).toEqual(blocked);
+    expect(() => validateCompletedReviewOutput(blocked)).toThrow(/before publication/);
+  });
+
+  it("requires blocked reviews to contain no findings and a reason", () => {
+    expect(() =>
+      validateReviewOutput({
+        ...validOutput,
+        status: "blocked",
+        blocked_reason: "   ",
+      }),
+    ).toThrow(/must be empty when review status is blocked/);
+    expect(() =>
+      validateReviewOutput({
+        status: "blocked",
+        findings: [],
+        summary: "The review could not be completed.",
+      }),
+    ).toThrow(/blocked_reason/);
+  });
+
+  it("rejects blocked_reason on a completed review", () => {
+    expect(() =>
+      validateReviewOutput({
+        ...validOutput,
+        blocked_reason: "Not applicable.",
+      }),
+    ).toThrow(/must be omitted/);
   });
 });
