@@ -66,6 +66,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
           request.log.info({ deliveryId, event }, "GitHub webhook ping accepted");
           return reply.code(200).send(result);
         }
+        if ("ignored" in result) {
+          request.log.info({ deliveryId, event }, "GitHub App lifecycle webhook acknowledged");
+          return reply.code(200).send(result);
+        }
         request.log.info(
           { deliveryId, event, enqueued: result.enqueued },
           "GitHub webhook accepted",

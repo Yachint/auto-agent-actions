@@ -8,6 +8,7 @@ const SUPPORTED_ACTIONS = new Set<PullRequestAction>([
   "synchronize",
   "ready_for_review",
 ]);
+const ACKNOWLEDGED_LIFECYCLE_EVENTS = new Set(["installation", "installation_repositories"]);
 const FULL_GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 const SIGNATURE_PATTERN = /^sha256=([0-9a-f]{64})$/i;
 
@@ -44,7 +45,7 @@ export async function acceptGitHubWebhook(
   rawBody: Buffer,
   headers: GitHubWebhookHeaders,
   dependencies: WebhookDependencies,
-): Promise<{ enqueued: boolean } | { ping: true }> {
+): Promise<{ enqueued: boolean } | { ping: true } | { ignored: true }> {
   if (!verifyGitHubSignature(rawBody, headers.signature, dependencies.secret)) {
     throw new WebhookRequestError("invalid webhook signature", 401);
   }
@@ -53,6 +54,9 @@ export async function acceptGitHubWebhook(
   }
   if (headers.event === "ping") {
     return Object.freeze({ ping: true as const });
+  }
+  if (ACKNOWLEDGED_LIFECYCLE_EVENTS.has(headers.event)) {
+    return Object.freeze({ ignored: true as const });
   }
   if (headers.event !== "pull_request") {
     throw new WebhookRequestError("unsupported GitHub event", 400);
