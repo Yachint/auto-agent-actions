@@ -166,9 +166,15 @@ describe("Codex review runner", () => {
   it("rejects worker startup when the Codex read-only sandbox is unavailable", async () => {
     await expect(
       verifyCodexReadOnlySandbox({
-        executor: async () => ({ ...successfulResult(), exitCode: 1 }),
+        executor: async () => ({
+          ...successfulResult(),
+          exitCode: 1,
+          stderr: "bwrap: permissions denied\n",
+        }),
       }),
-    ).rejects.toThrow(/sandbox preflight failed/);
+    ).rejects.toThrow(
+      /sandbox preflight failed: bwrap: permissions denied/,
+    );
   });
 
   it("requires trusted artifacts and output to be outside the worktree", async () => {

@@ -173,8 +173,29 @@ export async function verifyCodexReadOnlySandbox(
     result.timedOut ||
     result.outputLimitExceeded
   ) {
-    throw new CodexExecutionError("Codex read-only sandbox preflight failed", result);
+    throw new CodexExecutionError(
+      `Codex read-only sandbox preflight failed: ${describePreflightFailure(result)}`,
+      result,
+    );
   }
+}
+
+function describePreflightFailure(result: ProcessResult): string {
+  if (result.timedOut) return "timed out";
+  if (result.outputLimitExceeded) return "output limit exceeded";
+  if (result.signal !== null) return `terminated by ${result.signal}`;
+
+  const diagnostic = sanitizePreflightDiagnostic(result.stderr || result.stdout);
+  if (diagnostic) return diagnostic;
+  return `exit code ${result.exitCode ?? "unknown"}`;
+}
+
+function sanitizePreflightDiagnostic(value: string): string {
+  return value
+    .replace(/[^\x20-\x7e]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 512);
 }
 
 export function buildCodexArgs(

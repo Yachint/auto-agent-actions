@@ -119,7 +119,6 @@ services:
     # refuses to consume jobs unless the inner read-only sandbox actually works.
     cap_add: [SYS_ADMIN, SYS_CHROOT, SETUID, SETGID]
     security_opt:
-      - no-new-privileges:true
       - seccomp=unconfined
       - apparmor=unconfined
     build:
