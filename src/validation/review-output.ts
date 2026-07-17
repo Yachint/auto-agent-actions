@@ -60,6 +60,12 @@ export function validateReviewOutput(value: unknown): ReviewOutput {
   }
 
   const semanticIssues = value.findings.flatMap(validateFinding);
+  if (value.summary.trim().length === 0) {
+    semanticIssues.push({
+      location: "/summary",
+      message: "must contain non-whitespace text",
+    });
+  }
   if (semanticIssues.length > 0) {
     throw new ReviewOutputValidationError(semanticIssues);
   }

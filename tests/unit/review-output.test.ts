@@ -78,4 +78,10 @@ describe("review output validation", () => {
       }),
     ).toThrow(/greater than or equal to start_line/);
   });
+
+  it("rejects an empty or whitespace-only review summary", () => {
+    expect(() =>
+      validateReviewOutput({ ...validOutput, summary: "   " }),
+    ).toThrow(/non-whitespace text/);
+  });
 });

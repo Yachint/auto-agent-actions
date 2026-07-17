@@ -75,12 +75,22 @@ export class GitHubReviewPublisher {
 
     const inlineFindings = findings.slice(0, this.#maximumInlineComments);
     const overflowFindings = findings.slice(this.#maximumInlineComments);
+    const noFindingOutcome = findings.length === 0
+      ? anchored.review.findings.length === 0
+        ? "No actionable issues were found in the reviewed changes."
+        : "No findings met the configured confidence threshold."
+      : undefined;
     const review = await this.#client.createReview({
       repository: input.repository,
       pullRequestNumber: input.pullRequestNumber,
       commitId: input.reviewedHeadSha.toLowerCase(),
       event: "COMMENT",
-      body: buildReviewBody(anchored.review.summary, input.reviewedHeadSha, overflowFindings),
+      body: buildReviewBody(
+        anchored.review.summary,
+        input.reviewedHeadSha,
+        overflowFindings,
+        noFindingOutcome,
+      ),
       comments: inlineFindings.map(toReviewComment),
     });
     return { status: "published", reviewId: review.reviewId, comments: inlineFindings.length };
@@ -103,13 +113,17 @@ function buildReviewBody(
   summary: string,
   headSha: string,
   overflow: readonly ReviewFinding[],
+  noFindingOutcome?: string,
 ): string {
   const marker = `<!-- auto-agent-actions:head=${headSha.toLowerCase()} -->`;
-  if (overflow.length === 0) return `${summary}\n\n${marker}`;
+  const outcome = noFindingOutcome === undefined
+    ? summary
+    : `**Automated review completed**\n\n${noFindingOutcome}\n\n${summary}`;
+  if (overflow.length === 0) return `${outcome}\n\n${marker}`;
   const overflowList = overflow
     .map((finding) => `- P${finding.priority} \`${finding.path}:${finding.start_line}\` — ${finding.title}`)
     .join("\n");
-  return `${summary}\n\nAdditional findings omitted from inline comments:\n\n${overflowList}\n\n${marker}`;
+  return `${outcome}\n\nAdditional findings omitted from inline comments:\n\n${overflowList}\n\n${marker}`;
 }
 
 function validateInput(input: PublishReviewInput): void {

@@ -88,9 +88,31 @@ describe("webhook server runtime configuration", () => {
         expect.objectContaining({
           appId: "12345",
           privateKey: "test-private-key",
+          publishSummaryWithoutFindings: true,
           reconciliationIntervalMs: 900_000,
         }),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows summary-only publication to be explicitly disabled", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "auto-agent-config-"));
+    const keyPath = path.join(root, "app.pem");
+    await writeFile(keyPath, "test-private-key");
+    try {
+      await expect(
+        loadPublisherWorkerConfig({
+          REDIS_URL: validEnvironment.REDIS_URL,
+          GITHUB_ALLOWED_REPOSITORIES: "owner/project",
+          READ_TOKEN_BROKER_SOCKET: "/run/auto-agent-actions/broker.sock",
+          READ_TOKEN_BROKER_SECRET: "b".repeat(32),
+          GITHUB_APP_ID: "12345",
+          GITHUB_APP_PRIVATE_KEY_FILE: keyPath,
+          REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS: "false",
+        }),
+      ).resolves.toEqual(expect.objectContaining({ publishSummaryWithoutFindings: false }));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

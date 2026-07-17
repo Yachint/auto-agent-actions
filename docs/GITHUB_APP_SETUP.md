@@ -2,6 +2,8 @@
 
 Use this checklist only after the VPS preflight is ready. The first release uses a private App installed on explicitly selected personal repositories; do not select all repositories.
 
+See `docs/REVIEW_TRIGGERS.md` for the exact PR actions that start analysis and the events, including comments, that intentionally do not.
+
 ## 1. Generate the webhook secret on the VPS
 
 Create the secret file named by `GITHUB_WEBHOOK_SECRET_HOST_FILE` in `.env.vps`. Generate at least 32 random bytes, keep the file mode 0600, and copy the same value into GitHub's App form without storing it in shell history, source control, chat, or documentation.

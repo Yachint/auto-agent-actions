@@ -46,6 +46,7 @@ export interface PublisherWorkerConfig extends QueueRuntimeConfig {
   readonly brokerSharedSecret: string;
   readonly minimumConfidence: number;
   readonly maximumInlineComments: number;
+  readonly publishSummaryWithoutFindings: boolean;
   readonly reconciliationIntervalMs: number;
 }
 
@@ -150,6 +151,10 @@ export async function loadPublisherWorkerConfig(
       "REVIEW_MAXIMUM_INLINE_COMMENTS",
       100,
     ),
+    publishSummaryWithoutFindings: strictBoolean(
+      source.REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS ?? "true",
+      "REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS",
+    ),
     reconciliationIntervalMs: positiveInteger(
       source.RECONCILIATION_INTERVAL_MS ?? "900000",
       "RECONCILIATION_INTERVAL_MS",
@@ -219,6 +224,12 @@ function boundedNumber(
     throw new TypeError(`${name} must be between ${minimum} and ${maximum}`);
   }
   return parsed;
+}
+
+function strictBoolean(value: string, name: string): boolean {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new TypeError(`${name} must be true or false`);
 }
 
 function parseRedisUrl(value: string): string {

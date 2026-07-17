@@ -102,6 +102,40 @@ describe("GitHub review publisher", () => {
     expect(github.createReview).not.toHaveBeenCalled();
   });
 
+  it("publishes a meaningful summary-only COMMENT when enabled", async () => {
+    const github = client();
+    const publisher = new GitHubReviewPublisher(github, { publishEmptySummary: true });
+    await expect(
+      publisher.publish({
+        repository: "owner/project",
+        pullRequestNumber: 7,
+        reviewedHeadSha: headSha,
+        exactDiff: diff,
+        output: {
+          findings: [],
+          summary: "Reviewed the worker shutdown changes and error-handling flow.",
+        },
+      }),
+    ).resolves.toEqual({ status: "published", reviewId: 42, comments: 0 });
+    expect(github.createReview).toHaveBeenCalledWith({
+      repository: "owner/project",
+      pullRequestNumber: 7,
+      commitId: headSha,
+      event: "COMMENT",
+      body: expect.stringContaining(
+        "No actionable issues were found in the reviewed changes.",
+      ),
+      comments: [],
+    });
+    expect(github.createReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(
+          "Reviewed the worker shutdown changes and error-handling flow.",
+        ),
+      }),
+    );
+  });
+
   it("refuses closed, draft, and forked pull requests", async () => {
     for (const [state, expected] of [
       [{ state: "closed", draft: false, headSha, headRepository: "owner/project" }, "closed"],

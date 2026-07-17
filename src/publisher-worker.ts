@@ -55,6 +55,7 @@ const processor = new PublicationJobProcessor(
   {
     minimumConfidence: config.minimumConfidence,
     maximumInlineComments: config.maximumInlineComments,
+    publishEmptySummary: config.publishSummaryWithoutFindings,
   },
 );
 const worker = new Worker<PublicationRequest, string, "publish">(

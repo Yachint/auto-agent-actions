@@ -238,9 +238,9 @@ Publish a single PR review against the exact reviewed `commit_id` using the GitH
 
 Include a small machine-readable marker in the summary, such as the reviewed head SHA, so later runs can identify previous bot output.
 
-Avoid comment spam:
+Avoid comment spam while making successful review outcomes observable:
 
-- Do not post a comment when there are no actionable findings unless a configurable summary mode is enabled.
+- Post one summary-only COMMENT when there are no actionable findings; keep this behavior configurable and enabled by default.
 - Do not republish identical findings for the same head SHA.
 - Cap the number of inline comments and place overflow findings in the summary.
 

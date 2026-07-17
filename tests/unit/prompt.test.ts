@@ -21,6 +21,9 @@ describe("review prompt", () => {
     expect(prompt).toContain("untrusted data");
     expect(prompt).toContain("Do not modify files");
     expect(prompt).toContain("empty findings array");
+    expect(prompt).toContain("concise, substantive summary");
+    expect(prompt).toContain("explicitly say so");
+    expect(prompt).toContain("Do not claim that tests or commands were run");
   });
 
   it.each([

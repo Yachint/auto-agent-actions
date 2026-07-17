@@ -55,7 +55,9 @@ The command prints JSON to stdout. It never publishes to GitHub. Findings that c
 
 The server entry point exposes `POST /webhooks/github`, verifies the raw body signature, validates the event, applies the repository allowlist and no-fork policy, claims delivery IDs in Redis, and enqueues minimal immutable metadata. `GET /health/live` checks the process and `GET /health/ready` checks Redis.
 
-The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. It publishes only `COMMENT` reviews against the exact reviewed commit. No safe findings means no comment by default.
+See [`docs/REVIEW_TRIGGERS.md`](docs/REVIEW_TRIGGERS.md) for the exact events that do and do not trigger review, scheduled recovery behavior, and the current re-review procedure.
+
+The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. It publishes only `COMMENT` reviews against the exact reviewed commit. By default, a successful review with no publishable inline findings still posts a summary-only COMMENT so the reviewed outcome is visible; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
 
 The GitHub App private key exists only in the publisher process. The analysis worker requests a short-lived repository-read token over an authenticated, mode-0600 Unix socket; the broker enforces the repository allowlist and cannot issue a write token through that route. Git receives the read token through a temporary askpass environment, never through a remote URL, command argument, Git configuration, or persistent credential file. Publisher tokens are separately scoped to `pull_requests: write`.
 
@@ -79,6 +81,6 @@ npm run start:publisher-worker
 
 They require the variables documented in `.env.example`. The publisher owns the GitHub App private key and read-token broker socket. The analysis worker owns the Codex credential store and review data directory. Those credentials must not be mounted into the other service.
 
-For the container topology, secret preparation, Codex login boundary, backups, and launch preflight, follow [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Owner-side registration settings are in [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md), and the split between local evidence and live checks is recorded in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+For the container topology, secret preparation, Codex login boundary, backups, and launch preflight, follow [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Owner-side registration settings are in [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md), trigger behavior is in [`docs/REVIEW_TRIGGERS.md`](docs/REVIEW_TRIGGERS.md), and the split between local evidence and live checks is recorded in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
 See `docs/PLAN.md` for the full architecture and future milestones, and `MEMORY.md` for the durable decision log.
