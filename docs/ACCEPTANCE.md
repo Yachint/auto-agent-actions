@@ -10,7 +10,7 @@ This document separates locally verified behavior from checks that require the o
 | GitHub App connectivity/lifecycle can be acknowledged without queueing review work | Signed `ping`, `installation`, and `installation_repositories` webhooks return 200; invalid signatures still fail closed |
 | New commits supersede old heads without stale publication | Atomic review-state tests and the privileged analysis-to-publication handoff integration test |
 | Invalid signatures, forks, drafts, closed PRs, and repositories outside the allowlist fail closed | Webhook, analysis, publisher, and reconciliation tests |
-| Codex runs non-interactively with trusted model, effort, prompt, instructions, schema, timeout, output limits, and read-only sandbox settings | Runner, prompt, local workflow, setuid-Bubblewrap image, Compose-boundary, and startup sandbox-preflight tests |
+| Codex runs non-interactively with trusted model, effort, prompt, instructions, schema, timeout, output limits, and read-only sandbox settings | Runner, prompt, local workflow, Landlock selection, Compose-boundary, and startup write-denial tests |
 | Codex receives no GitHub token or unrelated environment secret | Environment allowlist tests and the separate publisher-side read-token broker boundary |
 | GitHub App private key is absent from the analysis configuration/process | Runtime configuration tests and separate entry-point dependency boundaries |
 | Private Git fetch credentials are not persisted in URLs, arguments, config, or helper files | Repository manager authentication tests |
@@ -22,7 +22,7 @@ This document separates locally verified behavior from checks that require the o
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` reported 0 vulnerabilities on 2026-07-16 |
 
-The latest local verification completed with `npm run build` and 122 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed previously.
+The latest local verification completed with `npm run build` and 123 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed previously.
 
 ## Owner/VPS verification required
 

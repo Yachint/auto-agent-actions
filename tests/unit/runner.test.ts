@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildCodexArgs,
   CodexExecutionError,
   runCodexReview,
   verifyCodexReadOnlySandbox,
@@ -155,8 +156,12 @@ describe("Codex review runner", () => {
           "sandbox",
           "-c",
           'sandbox_mode="read-only"',
+          "-c",
+          "features.use_legacy_landlock=true",
           "--",
-          "/bin/true",
+          "/bin/sh",
+          "-c",
+          "if : > /tmp/auto-agent-actions-sandbox-write-probe; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi",
         ],
         environment: { PATH: "/usr/bin" },
       }),
@@ -175,6 +180,19 @@ describe("Codex review runner", () => {
     ).rejects.toThrow(
       /sandbox preflight failed: bwrap: permissions denied/,
     );
+  });
+
+  it("forces the Landlock backend for review commands", () => {
+    const args = buildCodexArgs({
+      worktreePath: "/tmp/worktree",
+      schemaPath: "/trusted/review-schema.json",
+      instructionsPath: "/trusted/review-instructions.md",
+      outputPath: "/trusted/review-output.json",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+    });
+
+    expect(args).toContain("features.use_legacy_landlock=true");
   });
 
   it("requires trusted artifacts and output to be outside the worktree", async () => {

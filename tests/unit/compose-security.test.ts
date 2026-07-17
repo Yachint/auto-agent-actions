@@ -21,15 +21,12 @@ type Service = {
 };
 
 describe("Compose security boundaries", () => {
-  it("installs Bubblewrap in the setuid mode required by the non-root analysis worker", async () => {
+  it("does not add a setuid Bubblewrap helper to the analysis image", async () => {
     const dockerfile = await readFile(
       path.join(process.cwd(), "Dockerfile"),
       "utf8",
     );
-    expect(dockerfile).toContain(
-      "apt-get install -y --no-install-recommends bubblewrap ca-certificates git",
-    );
-    expect(dockerfile).toContain("chmod u+s /usr/bin/bwrap");
+    expect(dockerfile).not.toContain("bubblewrap");
   });
 
   it("keeps credentials, networks, ports, and writable storage in their intended services", async () => {
@@ -86,20 +83,8 @@ describe("Compose security boundaries", () => {
     }
     expect(server!.security_opt).toContain("no-new-privileges:true");
     expect(publisher!.security_opt).toContain("no-new-privileges:true");
-    expect(analysis!.cap_add).toEqual([
-      "SYS_ADMIN",
-      "SYS_CHROOT",
-      "SETUID",
-      "SETGID",
-      "NET_ADMIN",
-    ]);
-    expect(analysis!.security_opt).toEqual(
-      expect.arrayContaining([
-        "seccomp=unconfined",
-        "apparmor=unconfined",
-      ]),
-    );
-    expect(analysis!.security_opt).not.toContain("no-new-privileges:true");
+    expect(analysis!.security_opt).toContain("no-new-privileges:true");
+    expect(analysis!.cap_add).toBeUndefined();
     expect(server!.cap_add).toBeUndefined();
     expect(publisher!.cap_add).toBeUndefined();
     expect(server!.security_opt).not.toContain("seccomp=unconfined");

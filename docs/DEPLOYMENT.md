@@ -15,11 +15,11 @@ No service publishes a host port. The existing Traefik Docker provider discovers
 
 Both workers need outbound HTTPS: analysis needs GitHub fetch/API access and OpenAI inference; publisher needs GitHub API access. Docker Compose cannot enforce a hostname-level egress allowlist. Before reviewing public repositories, add a host firewall or authenticated forward proxy that restricts these containers to the required GitHub and OpenAI endpoints, then repeat the isolation audit. Forks remain rejected regardless.
 
-### Nested Codex sandbox
+### Codex sandbox
 
-Repository content is untrusted, so Codex keeps its Linux Bubblewrap sandbox enabled inside the analysis container. The analysis image installs the system `bubblewrap` package and enables its setuid mode, as OpenAI's secure non-root devcontainer does. Only that service receives `SYS_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, and `NET_ADMIN`, plus unconfined seccomp/AppArmor profiles. The first four capabilities let Bubblewrap create the nested namespace on Ubuntu hosts that restrict unprivileged user namespaces; `NET_ADMIN` is required only to configure loopback inside that new network namespace. `NET_RAW` is intentionally absent. The server, publisher, and Redis retain dropped capabilities, `no-new-privileges`, and their normal profiles.
+Repository content is untrusted, so Codex shell commands remain OS-sandboxed inside the analysis container. This VPS rejects Bubblewrap's nested network namespace with `RTM_NEWADDR: Operation not permitted` even when the upstream container capability profile is present. Both startup preflight and reviews therefore explicitly select Codex's documented legacy Landlock backend. Landlock enforces the read-only filesystem policy without setuid executables or nested namespace capabilities, while Codex's Linux sandbox retains its syscall-level network restrictions.
 
-This is an intentional transfer of the repository-execution boundary from Docker's default seccomp/AppArmor profile to Codex's inner read-only sandbox. The analysis root filesystem remains read-only and its application process remains UID/GID-remapped and non-root. Unlike the other services, analysis cannot use `no-new-privileges`, because that would prevent the trusted setuid Bubblewrap executable from creating the inner namespace; Codex and Node do not run as root. GitHub write credentials remain absent, and the worker runs a real `codex sandbox ... /bin/true` smoke test before connecting to Redis or consuming jobs. If the smoke test fails, the container exits and logs a bounded, control-character-stripped diagnostic; no review can be published. Do not replace the inner sandbox with `danger-full-access`; OpenAI warns that untrusted project content could then access credentials available inside the container. See [OpenAI's container sandbox guidance](https://learn.chatgpt.com/docs/agent-approvals-security#run-codex-in-dev-containers) and its [secure devcontainer image](https://github.com/openai/codex/blob/main/.devcontainer/Dockerfile.secure).
+Every application service now keeps Docker's default seccomp/AppArmor profiles, `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem, and a UID/GID-remapped non-root process. GitHub write credentials remain absent from analysis. Before connecting to Redis or consuming jobs, the worker runs `codex sandbox` under Landlock and attempts to write into the container's otherwise-writable `/tmp`; startup succeeds only when that write is denied. A failure exits the container with a bounded, control-character-stripped diagnostic, and no review can be published. Do not replace this with `danger-full-access`; OpenAI warns that untrusted project content could then access credentials available inside the container. See [OpenAI's container sandbox guidance](https://learn.chatgpt.com/docs/agent-approvals-security#run-codex-in-dev-containers) and the [Codex Linux sandbox backend documentation](https://github.com/openai/codex/blob/main/codex-rs/linux-sandbox/README.md).
 
 ## Host preparation
 
@@ -70,7 +70,9 @@ npm run preflight:vps -- .env.vps
 docker compose --env-file .env.vps config
 docker compose --env-file .env.vps build
 docker compose --env-file .env.vps run --rm --no-deps analysis \
-  codex sandbox -c 'sandbox_mode="read-only"' -- /bin/true
+  codex sandbox -c 'sandbox_mode="read-only"' \
+  -c 'features.use_legacy_landlock=true' -- \
+  /bin/sh -c 'if : > /tmp/auto-agent-actions-sandbox-write-probe; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi'
 ```
 
 The protected preflight validates non-secret values, required file types/sizes/permissions, the Codex directory owner and `auth.json` metadata, host commands, and the resolved Compose configuration. It does not read or print secret contents. The analysis image build verifies that the pinned Codex CLI version exposes every isolation/output flag used by the runner, while the explicit smoke command verifies the VPS kernel/container namespace path. Placeholder files may be used only for early image-build work; the protected preflight and services must not be run with placeholders.
