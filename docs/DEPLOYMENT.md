@@ -72,7 +72,7 @@ docker compose --env-file .env.vps build
 docker compose --env-file .env.vps run --rm --no-deps analysis \
   codex sandbox -c 'sandbox_mode="read-only"' \
   -c 'features.use_legacy_landlock=true' -- \
-  /bin/sh -c 'if : > /tmp/auto-agent-actions-sandbox-write-probe; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi'
+  /bin/sh -c "if /bin/sh -c ': > /tmp/auto-agent-actions-sandbox-write-probe'; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi"
 ```
 
 The protected preflight validates non-secret values, required file types/sizes/permissions, the Codex directory owner and `auth.json` metadata, host commands, and the resolved Compose configuration. It does not read or print secret contents. The analysis image build verifies that the pinned Codex CLI version exposes every isolation/output flag used by the runner, while the explicit smoke command verifies the VPS kernel/container namespace path. Placeholder files may be used only for early image-build work; the protected preflight and services must not be run with placeholders.

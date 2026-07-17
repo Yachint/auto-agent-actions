@@ -161,7 +161,7 @@ describe("Codex review runner", () => {
           "--",
           "/bin/sh",
           "-c",
-          "if : > /tmp/auto-agent-actions-sandbox-write-probe; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi",
+          "if /bin/sh -c ': > /tmp/auto-agent-actions-sandbox-write-probe'; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi",
         ],
         environment: { PATH: "/usr/bin" },
       }),
