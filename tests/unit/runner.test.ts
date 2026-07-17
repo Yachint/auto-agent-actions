@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildCodexArgs,
   CodexExecutionError,
+  executeProcess,
   runCodexReview,
   verifyCodexReadOnlySandbox,
   type ProcessExecutor,
@@ -128,6 +129,81 @@ describe("Codex review runner", () => {
     ).rejects.toThrow(CodexExecutionError);
   });
 
+  it("accepts a valid review when bounded process diagnostics were truncated", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      runCodexReview({
+        ...fixture,
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        prompt: "Trusted review prompt",
+        timeoutMs: 60_000,
+        executor: async () => {
+          await writeFile(
+            fixture.outputPath,
+            JSON.stringify({
+              status: "completed",
+              findings: [],
+              summary: "No findings.",
+              blocked_reason: null,
+            }),
+          );
+          return {
+            ...successfulResult(),
+            stdout: "bounded diagnostic prefix",
+            outputTruncated: true,
+          };
+        },
+      }),
+    ).resolves.toEqual({
+      status: "completed",
+      findings: [],
+      summary: "No findings.",
+      blocked_reason: null,
+    });
+  });
+
+  it("drains and discards process output beyond the diagnostic capture limit", async () => {
+    const result = await executeProcess({
+      command: process.execPath,
+      args: [
+        "-e",
+        'process.stdout.write("x".repeat(4096)); process.stderr.write("y".repeat(4096));',
+      ],
+      stdin: "",
+      environment: process.env,
+      timeoutMs: 10_000,
+      maxOutputBytes: 128,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(result.outputTruncated).toBe(true);
+    expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBe(
+      128,
+    );
+  });
+
+  it("still rejects an oversized structured review output file", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      runCodexReview({
+        ...fixture,
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        prompt: "Trusted review prompt",
+        timeoutMs: 60_000,
+        maxReviewOutputBytes: 32,
+        executor: async () => {
+          await writeFile(fixture.outputPath, "x".repeat(33));
+          return successfulResult();
+        },
+      }),
+    ).rejects.toThrow(/review output exceeded 32 bytes/);
+  });
+
   it("fails closed when Codex reports that repository inspection was blocked", async () => {
     const fixture = await createFixture();
     await expect(
@@ -197,6 +273,17 @@ describe("Codex review runner", () => {
     );
   });
 
+  it("rejects worker startup when sandbox preflight diagnostics are truncated", async () => {
+    await expect(
+      verifyCodexReadOnlySandbox({
+        executor: async () => ({
+          ...successfulResult(),
+          outputTruncated: true,
+        }),
+      }),
+    ).rejects.toThrow(/diagnostic output limit exceeded/);
+  });
+
   it("forces the Landlock backend for review commands", () => {
     const args = buildCodexArgs({
       worktreePath: "/tmp/worktree",
@@ -262,6 +349,6 @@ function successfulResult(): ProcessResult {
     stdout: "",
     stderr: "",
     timedOut: false,
-    outputLimitExceeded: false,
+    outputTruncated: false,
   };
 }

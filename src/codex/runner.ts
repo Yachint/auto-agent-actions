@@ -31,6 +31,7 @@ export interface CodexRunnerOptions {
   codexBinary?: string;
   environment?: NodeJS.ProcessEnv;
   executor?: ProcessExecutor;
+  /** Maximum combined stdout/stderr bytes retained for diagnostics. */
   maxProcessOutputBytes?: number;
   maxReviewOutputBytes?: number;
 }
@@ -57,7 +58,7 @@ export interface ProcessResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
-  outputLimitExceeded: boolean;
+  outputTruncated: boolean;
 }
 
 export type ProcessExecutor = (
@@ -108,13 +109,6 @@ export async function runCodexReview(
   if (result.timedOut) {
     throw new CodexExecutionError(
       `Codex review exceeded its ${options.timeoutMs}ms timeout`,
-      result,
-    );
-  }
-
-  if (result.outputLimitExceeded) {
-    throw new CodexExecutionError(
-      `Codex process output exceeded ${maxProcessOutputBytes} bytes`,
       result,
     );
   }
@@ -175,7 +169,7 @@ export async function verifyCodexReadOnlySandbox(
     result.exitCode !== 0 ||
     result.signal !== null ||
     result.timedOut ||
-    result.outputLimitExceeded
+    result.outputTruncated
   ) {
     throw new CodexExecutionError(
       `Codex read-only sandbox preflight failed: ${describePreflightFailure(result)}`,
@@ -186,7 +180,7 @@ export async function verifyCodexReadOnlySandbox(
 
 function describePreflightFailure(result: ProcessResult): string {
   if (result.timedOut) return "timed out";
-  if (result.outputLimitExceeded) return "output limit exceeded";
+  if (result.outputTruncated) return "diagnostic output limit exceeded";
   if (result.signal !== null) return `terminated by ${result.signal}`;
 
   const diagnostic = sanitizePreflightDiagnostic(result.stderr || result.stdout);
@@ -287,7 +281,7 @@ export const executeProcess: ProcessExecutor = async (
     const stderrChunks: Buffer[] = [];
     let capturedBytes = 0;
     let timedOut = false;
-    let outputLimitExceeded = false;
+    let outputTruncated = false;
     let stopping = false;
     let settled = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
@@ -308,10 +302,9 @@ export const executeProcess: ProcessExecutor = async (
         capturedBytes += retained.length;
       }
 
-      if (chunk.length > remaining && !outputLimitExceeded) {
-        outputLimitExceeded = true;
-        stopProcess();
-      }
+      // Keep draining the pipes so verbose Codex progress cannot block the child,
+      // but bound retained untrusted diagnostics independently of the result file.
+      if (chunk.length > remaining) outputTruncated = true;
     };
 
     child.stdout.on("data", (chunk: Buffer) => capture(stdoutChunks, chunk));
@@ -342,7 +335,7 @@ export const executeProcess: ProcessExecutor = async (
         stdout: Buffer.concat(stdoutChunks).toString("utf8"),
         stderr: Buffer.concat(stderrChunks).toString("utf8"),
         timedOut,
-        outputLimitExceeded,
+        outputTruncated,
       });
     });
 
