@@ -20,6 +20,7 @@ interface ReviewOutputBase {
 
 export interface CompletedReviewOutput extends ReviewOutputBase {
   status: "completed";
+  blocked_reason: null;
 }
 
 export interface BlockedReviewOutput extends ReviewOutputBase {
@@ -78,28 +79,27 @@ export function validateReviewOutput(value: unknown): ReviewOutput {
     });
   }
   if (value.status === "blocked") {
-    const blockedReason = (value as { blocked_reason?: unknown }).blocked_reason;
     if (value.findings.length > 0) {
       semanticIssues.push({
         location: "/findings",
         message: "must be empty when review status is blocked",
       });
     }
-    if (typeof blockedReason !== "string") {
+    if (value.blocked_reason === null) {
       semanticIssues.push({
         location: "/blocked_reason",
-        message: "is required when review status is blocked",
+        message: "must be a non-empty string when review status is blocked",
       });
-    } else if (blockedReason.trim().length === 0) {
+    } else if (value.blocked_reason.trim().length === 0) {
       semanticIssues.push({
         location: "/blocked_reason",
         message: "must contain non-whitespace text",
       });
     }
-  } else if ("blocked_reason" in value) {
+  } else if (value.blocked_reason !== null) {
     semanticIssues.push({
       location: "/blocked_reason",
-      message: "must be omitted when review status is completed",
+      message: "must be null when review status is completed",
     });
   }
   if (semanticIssues.length > 0) {

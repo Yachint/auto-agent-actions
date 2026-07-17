@@ -37,7 +37,12 @@ export function filterFindingsToExactDiff(
   }
 
   return {
-    review: { status: "completed", findings: accepted, summary: output.summary },
+    review: {
+      status: "completed",
+      findings: accepted,
+      summary: output.summary,
+      blocked_reason: null,
+    },
     rejected,
   };
 }

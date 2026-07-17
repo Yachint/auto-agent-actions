@@ -4,7 +4,7 @@
   "title": "Codex pull request review output",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "findings", "summary"],
+  "required": ["status", "findings", "summary", "blocked_reason"],
   "properties": {
     "status": {
       "type": "string",
@@ -46,6 +46,11 @@
       }
     },
     "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
-    "blocked_reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    "blocked_reason": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 1000,
+      "description": "Null for completed reviews; a concise reason for blocked reviews."
+    }
   }
 }

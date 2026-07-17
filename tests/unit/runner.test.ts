@@ -32,7 +32,12 @@ describe("Codex review runner", () => {
       capturedInvocation = invocation;
       await writeFile(
         fixture.outputPath,
-        JSON.stringify({ status: "completed", findings: [], summary: "No findings." }),
+        JSON.stringify({
+          status: "completed",
+          findings: [],
+          summary: "No findings.",
+          blocked_reason: null,
+        }),
       );
       return successfulResult();
     };
@@ -52,7 +57,12 @@ describe("Codex review runner", () => {
       },
     });
 
-    expect(review).toEqual({ status: "completed", findings: [], summary: "No findings." });
+    expect(review).toEqual({
+      status: "completed",
+      findings: [],
+      summary: "No findings.",
+      blocked_reason: null,
+    });
     expect(capturedInvocation).toBeDefined();
     expect(capturedInvocation?.stdin).toBe("Trusted review prompt");
     expect(capturedInvocation?.args.at(-1)).toBe("-");
@@ -78,7 +88,12 @@ describe("Codex review runner", () => {
     const fixture = await createFixture();
     await writeFile(
       fixture.outputPath,
-      JSON.stringify({ status: "completed", findings: [], summary: "Stale output" }),
+      JSON.stringify({
+        status: "completed",
+        findings: [],
+        summary: "Stale output",
+        blocked_reason: null,
+      }),
     );
 
     await expect(

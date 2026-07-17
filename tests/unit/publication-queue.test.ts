@@ -41,6 +41,7 @@ const valid = {
       },
     ],
     summary: "One issue.",
+    blocked_reason: null,
   },
 };
 

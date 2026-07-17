@@ -36,6 +36,7 @@ const exactDiff = {
 };
 const output = {
   status: "completed" as const,
+  blocked_reason: null,
   findings: [
     {
       title: "Handle failure",

@@ -199,6 +199,7 @@ Define a strict JSON Schema with no additional properties. Suggested shape:
 ```json
 {
   "status": "completed",
+  "blocked_reason": null,
   "findings": [
     {
       "title": "Short actionable title",
@@ -214,7 +215,7 @@ Define a strict JSON Schema with no additional properties. Suggested shape:
 }
 ```
 
-Priority should be constrained to an explicitly documented scale, for example P0 through P3. Confidence must be between 0 and 1. If the exact diff cannot be inspected reliably, output `status: "blocked"`, an empty findings array, and a non-empty `blocked_reason`; blocked output must fail the analysis job and must never reach publication.
+Priority should be constrained to an explicitly documented scale, for example P0 through P3. Confidence must be between 0 and 1. Structured Outputs requires every declared property, so completed reviews use `blocked_reason: null`. If the exact diff cannot be inspected reliably, output `status: "blocked"`, an empty findings array, and a non-empty `blocked_reason`; blocked output must fail the analysis job and must never reach publication.
 
 ## Result validation
 

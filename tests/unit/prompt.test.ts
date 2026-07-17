@@ -26,6 +26,7 @@ describe("review prompt", () => {
     expect(prompt).toContain("Do not claim that tests or commands were run");
     expect(prompt).toContain("status` to `completed` only after successfully inspecting");
     expect(prompt).toContain("status` to `blocked`");
+    expect(prompt).toContain("Set it to `null` when `status` is `completed`");
     expect(prompt).toContain("Never represent an incomplete inspection");
   });
 

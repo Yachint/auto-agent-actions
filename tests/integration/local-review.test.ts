@@ -45,6 +45,7 @@ describe("local review workflow", () => {
 
           return {
             status: "completed",
+            blocked_reason: null,
             findings: [
               {
                 title: "Changed line finding",
@@ -78,6 +79,7 @@ describe("local review workflow", () => {
       head_sha: fixture.headSha,
       review: {
         status: "completed",
+        blocked_reason: null,
         findings: [
           expect.objectContaining({
             title: "Changed line finding",

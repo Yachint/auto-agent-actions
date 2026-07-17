@@ -21,6 +21,7 @@ const validOutput = {
     },
   ],
   summary: "One actionable finding.",
+  blocked_reason: null,
 };
 
 describe("review output validation", () => {
@@ -98,7 +99,7 @@ describe("review output validation", () => {
     expect(() => validateCompletedReviewOutput(blocked)).toThrow(/before publication/);
   });
 
-  it("requires blocked reviews to contain no findings and a reason", () => {
+  it("requires blocked reviews to contain no findings and a non-null reason", () => {
     expect(() =>
       validateReviewOutput({
         ...validOutput,
@@ -111,16 +112,21 @@ describe("review output validation", () => {
         status: "blocked",
         findings: [],
         summary: "The review could not be completed.",
+        blocked_reason: null,
       }),
     ).toThrow(/blocked_reason/);
   });
 
-  it("rejects blocked_reason on a completed review", () => {
+  it("requires completed reviews to use a null blocked_reason", () => {
+    expect(() => {
+      const { blocked_reason: _blockedReason, ...missingReason } = validOutput;
+      validateReviewOutput(missingReason);
+    }).toThrow(/required property/);
     expect(() =>
       validateReviewOutput({
         ...validOutput,
         blocked_reason: "Not applicable.",
       }),
-    ).toThrow(/must be omitted/);
+    ).toThrow(/must be null/);
   });
 });
