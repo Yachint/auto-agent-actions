@@ -117,7 +117,7 @@ services:
     # Codex creates a nested Bubblewrap sandbox for repository-controlled data.
     # These relaxations apply only to this container; the startup smoke test
     # refuses to consume jobs unless the inner read-only sandbox actually works.
-    cap_add: [SYS_ADMIN, SYS_CHROOT, SETUID, SETGID]
+    cap_add: [SYS_ADMIN, SYS_CHROOT, SETUID, SETGID, NET_ADMIN]
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined

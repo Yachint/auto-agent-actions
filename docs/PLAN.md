@@ -356,7 +356,7 @@ Do not log prompts containing sensitive repository information by default. Recor
 - Add resource and network restrictions.
 - Add reconciliation, cleanup, health checks, metrics, and backups.
 
-The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, resource limits, exact-path Traefik ingress labels, Redis persistence, and an internal metrics endpoint. Capabilities remain dropped for every service except the analysis container's documented Bubblewrap namespace requirements. Analysis uses the upstream secure-container pattern of a setuid Bubblewrap executable under a non-root application process, so it alone omits `no-new-privileges`; a startup smoke test prevents job consumption if the inner read-only sandbox is unavailable. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
+The checked-in Compose topology implements separate secrets and process boundaries, internal Redis, read-only root filesystems, resource limits, exact-path Traefik ingress labels, Redis persistence, and an internal metrics endpoint. Capabilities remain dropped for every service except the analysis container's documented Bubblewrap namespace requirements, including `NET_ADMIN` for loopback configuration inside the new network namespace. Analysis uses the upstream secure-container pattern of a setuid Bubblewrap executable under a non-root application process, so it alone omits `no-new-privileges`; a startup smoke test prevents job consumption if the inner read-only sandbox is unavailable. Hostname-level egress enforcement and backup execution remain host operations documented in `docs/DEPLOYMENT.md`.
 
 ## Minimum acceptance criteria
 

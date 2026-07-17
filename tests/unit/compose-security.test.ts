@@ -91,6 +91,7 @@ describe("Compose security boundaries", () => {
       "SYS_CHROOT",
       "SETUID",
       "SETGID",
+      "NET_ADMIN",
     ]);
     expect(analysis!.security_opt).toEqual(
       expect.arrayContaining([
