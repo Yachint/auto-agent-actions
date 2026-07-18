@@ -29,7 +29,7 @@ export interface CreateGitHubReviewInput {
   readonly pullRequestNumber: number;
   readonly commitId: string;
   readonly body: string;
-  readonly event: "COMMENT";
+  readonly event: "COMMENT" | "REQUEST_CHANGES";
   readonly comments: readonly GitHubReviewComment[];
 }
 

@@ -84,7 +84,7 @@ export class GitHubReviewPublisher {
       repository: input.repository,
       pullRequestNumber: input.pullRequestNumber,
       commitId: input.reviewedHeadSha.toLowerCase(),
-      event: "COMMENT",
+      event: findings.length === 0 ? "COMMENT" : "REQUEST_CHANGES",
       body: buildReviewBody(
         anchored.review.summary,
         input.reviewedHeadSha,

@@ -192,7 +192,7 @@ describe("privilege-separated analysis to publication handoff", () => {
     await expect(processor.process(publication)).resolves.toBe("published");
     expect(tokens.getToken).toHaveBeenCalledWith(77, "owner/project", "review-write");
     expect(client.createReview).toHaveBeenCalledWith(
-      expect.objectContaining({ event: "COMMENT", commitId: headSha }),
+      expect.objectContaining({ event: "REQUEST_CHANGES", commitId: headSha }),
     );
     expect(await state.get("owner/project", 7)).toEqual(
       expect.objectContaining({

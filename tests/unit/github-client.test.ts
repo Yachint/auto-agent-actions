@@ -104,7 +104,7 @@ describe("GitHub REST client", () => {
     );
   });
 
-  it("creates only an advisory review using right-side line anchors", async () => {
+  it("creates a changes-requested review using right-side line anchors", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response(JSON.stringify({ id: 99 }), { status: 200 }),
     );
@@ -115,7 +115,7 @@ describe("GitHub REST client", () => {
         pullRequestNumber: 7,
         commitId: headSha,
         body: "Summary",
-        event: "COMMENT",
+        event: "REQUEST_CHANGES",
         comments: [{ path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" }],
       }),
     ).resolves.toEqual({ reviewId: 99 });
@@ -123,7 +123,7 @@ describe("GitHub REST client", () => {
     expect(JSON.parse(String(request.body))).toEqual({
       commit_id: headSha,
       body: "Summary",
-      event: "COMMENT",
+      event: "REQUEST_CHANGES",
       comments: [{ path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" }],
     });
   });

@@ -155,6 +155,11 @@ This file is the durable, chronological handoff for future development sessions.
 - The first live analysis after the Landlock rollout reached Codex but failed before review because the strict output schema declared `blocked_reason` without requiring it. OpenAI Structured Outputs requires every declared object property to be required; conditionally absent values must instead be nullable. `blocked_reason` is now required and nullable, completed reviews must emit `null`, blocked reviews must emit a non-empty string, and a recursive schema test enforces required-property parity plus `additionalProperties: false` for every object. The full local suite now passes 125 standard tests.
 - A later large-PR review exceeded the 256 KiB combined Codex stdout/stderr capture limit even though its structured result uses a separate trusted output file. Process diagnostics are now drained continuously, retained only up to the fixed in-memory cap, and discarded thereafter without terminating an otherwise valid review. Timeouts, nonzero exits, sandbox preflight truncation, the 1 MiB structured-output cap, schema validation, and publication validation remain fail-closed. Regression coverage exercises a real noisy child process plus successful truncation and oversized-result rejection; the full local suite now passes 129 standard tests.
 
+## 2026-07-18 — Changes-requested review signaling
+
+- Reviews containing one or more exact-diff-validated findings at or above the configured confidence threshold now use GitHub's `REQUEST_CHANGES` event. This provides a machine-readable PR review signal for automated remediation workflows while retaining the exact-head stale-result check and existing inline-anchor validation.
+- Completed reviews without publishable findings remain summary-only `COMMENT` reviews and do not approve the pull request. A merge-blocking prior changes request therefore still requires an approval or repository stale-review dismissal policy to clear.
+
 ## Unresolved decisions
 
 - The checked-in Compose stack still requires syntax/build/runtime validation on a Docker host, Redis backup/restore rehearsal, and host-level egress controls before public-repository launch.

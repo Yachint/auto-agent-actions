@@ -15,7 +15,7 @@ This document separates locally verified behavior from checks that require the o
 | GitHub App private key is absent from the analysis configuration/process | Runtime configuration tests and separate entry-point dependency boundaries |
 | Private Git fetch credentials are not persisted in URLs, arguments, config, or helper files | Repository manager authentication tests |
 | Only exact right-side changed lines can be published | Exact diff parser, output validator, persisted publication-payload validator, and publisher tests |
-| Reviews use advisory `COMMENT` only; successful zero-finding reviews post a visible summary | Publisher tests |
+| Reviews with publishable findings use `REQUEST_CHANGES`; successful zero-finding reviews post a visible `COMMENT` summary | REST client, publisher, and privileged-handoff tests |
 | A blocked or incomplete Codex inspection cannot enter the publication queue | Structured-output, runner, and persisted publication-payload tests |
 | Missed webhooks are recovered | Reconciliation processor tests using the same durable queue/state idempotency path |
 | Crashed worktrees are cleaned without path escape | Repository cleanup tests |
@@ -30,7 +30,7 @@ The latest local verification completed with `npm run build` and 129 passing sta
 2. Authenticate the pinned containerized Codex CLI into the dedicated `CODEX_HOME` and confirm `codex login status` without exposing `auth.json`.
 3. Create and install the private GitHub App on selected repositories with Contents read, Pull requests read/write, Metadata read, and the `pull_request` webhook.
 4. Configure the generated private key and webhook secret, start the stack, and confirm no project service publishes host ports and Traefik exposes only the exact webhook path.
-5. Deliver a signed test webhook, open a same-repository PR, and verify exactly one correctly anchored `COMMENT` review against the current head.
+5. Deliver a signed test webhook, open a same-repository PR with a publishable finding, and verify exactly one correctly anchored `REQUEST_CHANGES` review against the current head. Then verify a clean new head receives a summary-only `COMMENT`.
 6. Push a replacement commit during a deliberately slow review and verify no review is posted for the obsolete SHA.
 7. Stop webhook delivery temporarily, push a commit, restore the stack, and confirm reconciliation recovers the missed head.
 8. Inspect logs and container environments/mounts for credential separation, then rehearse Redis backup and restore.

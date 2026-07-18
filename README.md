@@ -1,6 +1,6 @@
 # Auto Agent Actions
 
-Self-hosted pull request reviews powered by Codex CLI. Milestones 1–3 are implemented: signed GitHub webhooks enter a durable Redis queue, an isolated analysis worker reviews the exact pull-request head, and a separately privileged publisher posts validated advisory comments. Milestone 4 deployment isolation, reconciliation, cleanup, health checks, and internal metrics are implemented locally; live container validation and GitHub App setup remain.
+Self-hosted pull request reviews powered by Codex CLI. Milestones 1–3 are implemented: signed GitHub webhooks enter a durable Redis queue, an isolated analysis worker reviews the exact pull-request head, and a separately privileged publisher posts validated reviews. Milestone 4 deployment isolation, reconciliation, cleanup, health checks, and internal metrics are implemented locally; live container validation and GitHub App setup remain.
 
 ## Requirements
 
@@ -57,7 +57,7 @@ The server entry point exposes `POST /webhooks/github`, verifies the raw body si
 
 See [`docs/REVIEW_TRIGGERS.md`](docs/REVIEW_TRIGGERS.md) for the exact events that do and do not trigger review, scheduled recovery behavior, and the current re-review procedure.
 
-The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. It publishes only `COMMENT` reviews against the exact reviewed commit. By default, a successful review with no publishable inline findings still posts a summary-only COMMENT so the reviewed outcome is visible; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
+The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. Reviews with publishable findings use `REQUEST_CHANGES` against the exact reviewed commit. By default, a successful review with no publishable inline findings posts a summary-only `COMMENT` so the reviewed outcome is visible without approving the pull request; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
 
 Codex output explicitly distinguishes a completed review from a blocked inspection. Blocked output fails the analysis job and cannot enter the publication queue. On Linux deployments, the worker uses Codex's Landlock fallback because the VPS rejects Bubblewrap's nested network namespace. A startup probe proves the sandbox denies a real write before consuming jobs, preventing filesystem-sandbox failures from being mislabeled as successful no-finding reviews.
 

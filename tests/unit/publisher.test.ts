@@ -39,7 +39,7 @@ function client(currentHeadSha = headSha): GitHubReviewClient {
 }
 
 describe("GitHub review publisher", () => {
-  it("revalidates anchors and publishes a COMMENT against the exact head", async () => {
+  it("revalidates anchors and requests changes against the exact head", async () => {
     const github = client();
     const publisher = new GitHubReviewPublisher(github);
     await expect(
@@ -60,7 +60,7 @@ describe("GitHub review publisher", () => {
       repository: "owner/project",
       pullRequestNumber: 7,
       commitId: headSha,
-      event: "COMMENT",
+      event: "REQUEST_CHANGES",
       body: expect.stringContaining(`<!-- auto-agent-actions:head=${headSha} -->`),
       comments: [{
         path: "src/app.ts",

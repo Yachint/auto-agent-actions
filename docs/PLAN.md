@@ -371,6 +371,7 @@ The checked-in Compose topology implements separate secrets and process boundari
 - The Codex process has no GitHub write credential.
 - Invalid paths and line ranges are never published.
 - A valid finding appears on the correct changed line in GitHub.
+- A review with one or more publishable findings requests changes on the pull request.
 - A completed no-finding review produces one summary-only advisory comment.
 - A blocked or incomplete inspection produces no review and fails closed.
 - A scheduled reconciliation recovers a deliberately missed webhook.
@@ -380,7 +381,7 @@ The checked-in Compose topology implements separate secrets and process boundari
 
 1. Repositories may be public or private but must be explicitly allowlisted personal repositories. Forked pull requests are rejected; fork support is future scope.
 2. Reviews use `gpt-5.6-sol` with `high` reasoning effort and the standard non-fast service tier.
-3. Reviews are advisory `COMMENT` reviews only.
+3. Reviews with publishable findings use `REQUEST_CHANGES`; completed reviews without publishable findings use an advisory `COMMENT` and do not approve the pull request.
 4. Repository-controlled agent guidance is ignored. Workers use only the trusted instructions stored outside review worktrees.
 5. The first release reuses a ChatGPT subscription login cached for the isolated VPS worker. Public-repository launch remains gated on deployment isolation review.
 
@@ -388,7 +389,7 @@ The first release uses Redis for operational queue and review state. PostgreSQL 
 
 ## Guidance for the implementing agent
 
-Start with Milestone 1 and keep the first slice end-to-end. Do not add automatic code modification, test execution, merge blocking, or `REQUEST_CHANGES` behavior until review correctness, stale-SHA handling, and credential isolation are verified.
+Start with Milestone 1 and keep the first slice end-to-end. Do not add automatic code modification or test execution. `REQUEST_CHANGES` publication must preserve review correctness, stale-SHA handling, and credential isolation.
 
 When making implementation choices, prioritize:
 

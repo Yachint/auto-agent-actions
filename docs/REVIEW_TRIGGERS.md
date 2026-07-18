@@ -18,13 +18,15 @@ GitHub describes `opened`, `reopened`, `synchronize`, and `ready_for_review` as 
 
 ## What appears after a successful review
 
-- If publishable findings exist, the App posts one advisory `COMMENT` review with validated inline comments and a summary.
+- If publishable findings exist, the App posts one `REQUEST_CHANGES` review with validated inline comments and a summary. This changes the pull request's review state and can trigger automation that listens for requested changes.
 - If no actionable findings are returned, the App still posts a summary-only `COMMENT` stating that the review completed, that no actionable issues were found, and what areas were reviewed.
 - If candidate findings exist but none meet the configured confidence threshold, the summary-only comment says that no findings met the publication threshold.
 - If Codex cannot inspect the exact diff, it returns a blocked result. The analysis job fails and no review is published; a blocked inspection is never described as “no issues found.”
 - Closed, draft, forked, or stale-head results never post. A stale result schedules the newest head instead.
 
 Summary-only comments are enabled by default with `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=true`. Redis head-SHA state prevents reconciliation or redelivery from posting the same review repeatedly for an unchanged head.
+
+A clean summary remains a `COMMENT`, not an `APPROVE` review. If repository rules make a prior changes-requested review merge-blocking, clearing that merge block requires an approval or a configured stale-review dismissal policy; this service does not approve pull requests.
 
 ## Events that do not start a review
 

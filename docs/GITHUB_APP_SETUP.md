@@ -40,7 +40,7 @@ Set every permission not named below to `No access`:
 | Repository permission | Access | Used for |
 | --- | --- | --- |
 | Contents | Read-only | Exact Git fetch of base and PR head refs |
-| Pull requests | Read and write | Read current PR state/list open PRs and create advisory reviews |
+| Pull requests | Read and write | Read current PR state/list open PRs and create comment or changes-requested reviews |
 | Metadata | Read-only | GitHub's standard repository metadata access |
 
 Subscribe only to the `Pull request` event.
