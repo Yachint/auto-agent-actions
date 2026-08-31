@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BullMqPublicationQueue,
+  validateFailurePublicationRequest,
   validatePublicationRequest,
 } from "../../src/queue/publication-queue.js";
 
@@ -100,5 +101,35 @@ describe("publication queue", () => {
         },
       }),
     ).toThrow(/must be completed before publication/);
+  });
+
+  it("enqueues a bounded, per-head terminal failure notification", async () => {
+    const queue = { add: vi.fn().mockResolvedValue({}), close: vi.fn().mockResolvedValue(undefined) };
+    const publications = new BullMqPublicationQueue({ queue });
+    const failure = validateFailurePublicationRequest({
+      reviewRequest: valid.reviewRequest,
+      failureCode: "timeout",
+    });
+
+    await publications.enqueueFailure(failure);
+
+    expect(queue.add).toHaveBeenCalledWith(
+      "notify-failure",
+      failure,
+      expect.objectContaining({
+        jobId: expect.stringMatching(/^[0-9a-f]{64}$/),
+        attempts: 3,
+        sizeLimit: 32 * 1024,
+      }),
+    );
+  });
+
+  it("rejects untrusted terminal failure codes", () => {
+    expect(() =>
+      validateFailurePublicationRequest({
+        reviewRequest: valid.reviewRequest,
+        failureCode: "include raw exception details",
+      }),
+    ).toThrow(/code is invalid/);
   });
 });

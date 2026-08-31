@@ -160,6 +160,17 @@ This file is the durable, chronological handoff for future development sessions.
 - Reviews containing one or more exact-diff-validated findings at or above the configured confidence threshold now use GitHub's `REQUEST_CHANGES` event. This provides a machine-readable PR review signal for automated remediation workflows while retaining the exact-head stale-result check and existing inline-anchor validation.
 - Completed reviews without publishable findings remain summary-only `COMMENT` reviews and do not approve the pull request. A merge-blocking prior changes request therefore still requires an approval or repository stale-review dismissal policy to clear.
 
+## 2026-08-31 — Second review repository
+
+- Added `Yachint/agent-images` to the private GitHub App's selected repositories and the VPS `GITHUB_ALLOWED_REPOSITORIES` allowlist alongside `Yachint/agent-pages`. GitHub App repository-read access returned HTTP 200, protected preflight passed, and the recreated Compose stack started with zero restarts. Publisher startup reconciliation checked both repositories with no failures and queued one eligible open pull request from the newly added repository.
+
+## 2026-08-31 — Silent review failure recovery
+
+- A live `Yachint/agent-images#2` review exposed a base-ref race: GitHub's captured base commit remained available in fetched history while the base branch tip had advanced. Repository preparation now uses the exact captured base commit when resolvable, continues to require the exact PR head, and fails closed when either required object is unavailable.
+- Reconciliation delivery identities now include the reconciliation run timestamp. Redis review state still suppresses handled heads, while a failed head can receive a new BullMQ job even though its previous failed job is retained.
+- Exhausted analysis attempts enqueue a validated failure-notification job for the privileged publisher. The publisher rechecks the current head and posts one sanitized summary-only `COMMENT` review stating that no conclusion was produced; stale heads, closed/draft PRs, forks, raw errors, and inline findings are excluded.
+- The production and default Codex analysis timeout is now 1,800,000 ms (30 minutes) for large pull requests.
+
 ## Unresolved decisions
 
 - The checked-in Compose stack still requires syntax/build/runtime validation on a Docker host, Redis backup/restore rehearsal, and host-level egress controls before public-repository launch.

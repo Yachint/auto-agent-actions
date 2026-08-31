@@ -16,6 +16,7 @@ export interface ReconciliationDependencies {
   readonly tokenProvider: InstallationTokenProvider;
   readonly reviewQueue: ReviewQueue;
   readonly createPullRequestClient?: (token: string) => GitHubPullRequestListClient;
+  readonly now?: () => Date;
 }
 
 export interface ReconciliationResult {
@@ -36,6 +37,7 @@ export class ReconciliationProcessor {
   }
 
   async run(): Promise<ReconciliationResult> {
+    const runTimestamp = (this.#dependencies.now ?? (() => new Date()))().toISOString();
     let pullRequestsSeen = 0;
     let eligiblePullRequests = 0;
     const repositoriesFailed: string[] = [];
@@ -62,6 +64,7 @@ export class ReconciliationProcessor {
               repository,
               pullRequest.pullRequestNumber,
               pullRequest.headSha,
+              runTimestamp,
             ),
             installationId,
             repository,
@@ -88,8 +91,9 @@ function reconciliationDeliveryId(
   repository: string,
   pullRequestNumber: number,
   headSha: string,
+  runTimestamp: string,
 ): string {
   return `reconcile-${createHash("sha256")
-    .update(`${repository}#${pullRequestNumber}#${headSha.toLowerCase()}`)
+    .update(`${repository}#${pullRequestNumber}#${headSha.toLowerCase()}#${runTimestamp}`)
     .digest("hex")}`;
 }

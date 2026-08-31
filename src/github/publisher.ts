@@ -29,6 +29,11 @@ export type PublishReviewResult =
   | { readonly status: "stale"; readonly currentHeadSha: string }
   | { readonly status: "ineligible"; readonly reason: "closed" | "draft" | "fork" };
 
+export type PublishFailureResult =
+  | { readonly status: "published"; readonly reviewId: number }
+  | { readonly status: "stale"; readonly currentHeadSha: string }
+  | { readonly status: "ineligible"; readonly reason: "closed" | "draft" | "fork" };
+
 export class GitHubReviewPublisher {
   readonly #client: GitHubReviewClient;
   readonly #minimumConfidence: number;
@@ -94,6 +99,53 @@ export class GitHubReviewPublisher {
       comments: inlineFindings.map(toReviewComment),
     });
     return { status: "published", reviewId: review.reviewId, comments: inlineFindings.length };
+  }
+
+  async publishFailure(input: {
+    repository: string;
+    pullRequestNumber: number;
+    headSha: string;
+    failureCode: string;
+  }): Promise<PublishFailureResult> {
+    validateFullSha(input.headSha, "headSha");
+    const pullRequest = await this.#client.getPullRequest(
+      input.repository,
+      input.pullRequestNumber,
+    );
+    if (pullRequest.state !== "open") return { status: "ineligible", reason: "closed" };
+    if (pullRequest.draft) return { status: "ineligible", reason: "draft" };
+    if (pullRequest.headRepository !== input.repository) {
+      return { status: "ineligible", reason: "fork" };
+    }
+    if (pullRequest.headSha !== input.headSha.toLowerCase()) {
+      return { status: "stale", currentHeadSha: pullRequest.headSha };
+    }
+    const review = await this.#client.createReview({
+      repository: input.repository,
+      pullRequestNumber: input.pullRequestNumber,
+      commitId: input.headSha.toLowerCase(),
+      event: "COMMENT",
+      body: buildFailureBody(input.headSha, input.failureCode),
+      comments: [],
+    });
+    return { status: "published", reviewId: review.reviewId };
+  }
+}
+
+function buildFailureBody(headSha: string, failureCode: string): string {
+  const reason = failureCode === "base-ref-changed"
+    ? "the pull request base changed while the review was being prepared"
+    : failureCode === "head-ref-changed"
+      ? "the pull request head changed while the review was being prepared"
+      : failureCode === "timeout"
+        ? "the review exceeded its execution time limit"
+        : "the analysis worker encountered an internal failure";
+  return `**Automated review could not complete**\n\nNo review conclusion was produced for \`${headSha.slice(0, 7)}\` because ${reason}. The service will retry this head during reconciliation.\n\n<!-- auto-agent-actions:failure:head=${headSha.toLowerCase()} -->`;
+}
+
+function validateFullSha(value: string, name: string): void {
+  if (!FULL_GIT_SHA_PATTERN.test(value)) {
+    throw new TypeError(`${name} must be a full Git object ID`);
   }
 }
 

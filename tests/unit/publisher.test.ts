@@ -150,6 +150,39 @@ describe("GitHub review publisher", () => {
     );
   });
 
+  it("publishes a sanitized terminal failure notice only for the current head", async () => {
+    const github = client();
+    const publisher = new GitHubReviewPublisher(github);
+
+    await expect(
+      publisher.publishFailure({
+        repository: "owner/project",
+        pullRequestNumber: 7,
+        headSha,
+        failureCode: "base-ref-changed",
+      }),
+    ).resolves.toEqual({ status: "published", reviewId: 42 });
+    expect(github.createReview).toHaveBeenCalledWith({
+      repository: "owner/project",
+      pullRequestNumber: 7,
+      commitId: headSha,
+      event: "COMMENT",
+      body: expect.stringMatching(/could not complete[\s\S]*No review conclusion[\s\S]*base changed/i),
+      comments: [],
+    });
+
+    const staleGithub = client(newerHeadSha);
+    await expect(
+      new GitHubReviewPublisher(staleGithub).publishFailure({
+        repository: "owner/project",
+        pullRequestNumber: 7,
+        headSha,
+        failureCode: "analysis-failed",
+      }),
+    ).resolves.toEqual({ status: "stale", currentHeadSha: newerHeadSha });
+    expect(staleGithub.createReview).not.toHaveBeenCalled();
+  });
+
   it("refuses closed, draft, and forked pull requests", async () => {
     for (const [state, expected] of [
       [{ state: "closed", draft: false, headSha, headRepository: "owner/project" }, "closed"],

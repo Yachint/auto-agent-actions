@@ -98,7 +98,7 @@ export async function loadAnalysisWorkerConfig(
     dataDirectory: path.resolve(source.REVIEW_DATA_DIR ?? ".review-data"),
     model: modelIdentifier(source.CODEX_MODEL ?? "gpt-5.6-sol"),
     reasoningEffort: reasoningEffort(source.CODEX_REASONING_EFFORT ?? "high"),
-    timeoutMs: positiveInteger(source.CODEX_TIMEOUT_MS ?? "600000", "CODEX_TIMEOUT_MS", 3_600_000),
+    timeoutMs: positiveInteger(source.CODEX_TIMEOUT_MS ?? "1800000", "CODEX_TIMEOUT_MS", 3_600_000),
     codexBinary: commandName(source.CODEX_BINARY ?? "codex", "CODEX_BINARY"),
     schemaPath: fileURLToPath(new URL("../codex/review-schema.json", import.meta.url)),
     instructionsPath: fileURLToPath(new URL("../codex/review-instructions.md", import.meta.url)),

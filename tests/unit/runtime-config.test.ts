@@ -64,6 +64,7 @@ describe("webhook server runtime configuration", () => {
         reasoningEffort: "high",
         brokerSocketPath: "/run/auto-agent-actions/broker.sock",
         abandonedWorktreeAgeMs: 86_400_000,
+        timeoutMs: 1_800_000,
       }),
     );
     expect(config).not.toHaveProperty("privateKey");

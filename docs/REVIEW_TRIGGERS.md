@@ -12,6 +12,10 @@ Auto Agent Actions reviews a pull request only when its current head commit is e
 | A draft PR is marked ready for review | `pull_request.ready_for_review` | Reviews the current head. Draft PRs themselves are not reviewed. |
 | A supported webhook was missed during downtime | Scheduled reconciliation | At publisher startup and every `RECONCILIATION_INTERVAL_MS` (15 minutes by default), scans allowlisted repositories for eligible open PR heads and queues any head not already handled. |
 
+If all bounded analysis attempts fail, the publisher posts one sanitized summary-only review for the current head stating that no review conclusion was produced. Failed heads remain eligible for a later reconciliation attempt; each reconciliation run uses a fresh queue delivery identity so a retained failed BullMQ job cannot suppress recovery.
+
+The analysis timeout is controlled by `CODEX_TIMEOUT_MS` and defaults to 30 minutes. A timeout is a failed review, never a successful no-finding outcome.
+
 Every case must also pass all eligibility checks: the repository is installed and allowlisted, the PR is open and non-draft, the head and base belong to the same repository, and the head SHA is valid. Forked PRs are not supported in the first release.
 
 GitHub describes `opened`, `reopened`, `synchronize`, and `ready_for_review` as activity types of the `pull_request` event. See [GitHub webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads).

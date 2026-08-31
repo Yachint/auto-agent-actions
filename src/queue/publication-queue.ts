@@ -16,12 +16,26 @@ export interface PublicationRequest {
   readonly output: CompletedReviewOutput;
 }
 
+export type AnalysisFailureCode =
+  | "base-ref-changed"
+  | "head-ref-changed"
+  | "timeout"
+  | "analysis-failed";
+
+export interface FailurePublicationRequest {
+  readonly reviewRequest: ReviewRequest;
+  readonly failureCode: AnalysisFailureCode;
+}
+
+export type PublicationJob = PublicationRequest | FailurePublicationRequest;
+
 export interface PublicationQueue {
   enqueue(request: PublicationRequest): Promise<void>;
+  enqueueFailure(request: FailurePublicationRequest): Promise<void>;
 }
 
 interface QueueLike {
-  add(name: "publish", data: PublicationRequest, options: JobsOptions): Promise<unknown>;
+  add(name: "publish" | "notify-failure", data: PublicationJob, options: JobsOptions): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -41,7 +55,7 @@ export class BullMqPublicationQueue implements PublicationQueue {
       if (options.connection === undefined) {
         throw new TypeError("connection is required when queue is not injected");
       }
-      this.#queue = new Queue<PublicationRequest, unknown, "publish">(
+      this.#queue = new Queue<PublicationJob, unknown, "publish" | "notify-failure">(
         options.queueName ?? "pull-request-publications",
         { connection: options.connection },
       );
@@ -66,9 +80,61 @@ export class BullMqPublicationQueue implements PublicationQueue {
     });
   }
 
+  async enqueueFailure(value: FailurePublicationRequest): Promise<void> {
+    const request = validateFailurePublicationRequest(value);
+    const jobId = createHash("sha256")
+      .update(
+        `failure#${request.reviewRequest.repository}#${request.reviewRequest.pullRequestNumber}#${request.reviewRequest.headSha}`,
+      )
+      .digest("hex");
+    await this.#queue.add("notify-failure", request, {
+      jobId,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 1_000 },
+      removeOnComplete: { age: 30 * 24 * 60 * 60, count: 10_000 },
+      removeOnFail: { age: 30 * 24 * 60 * 60, count: 10_000 },
+      sizeLimit: 32 * 1024,
+      stackTraceLimit: 5,
+    });
+  }
+
   async close(): Promise<void> {
     await this.#queue.close();
   }
+}
+
+export function validatePublicationJob(value: unknown): PublicationJob {
+  if (isFailurePublicationRequest(value)) return validateFailurePublicationRequest(value);
+  return validatePublicationRequest(value);
+}
+
+export function validateFailurePublicationRequest(value: unknown): FailurePublicationRequest {
+  if (!isFailurePublicationRequest(value)) {
+    throw new TypeError("failure publication queue payload is invalid");
+  }
+  const payload = value as Record<string, unknown>;
+  const failureCode = payload.failureCode;
+  if (
+    typeof failureCode !== "string" ||
+    !new Set(["base-ref-changed", "head-ref-changed", "timeout", "analysis-failed"]).has(
+      failureCode,
+    )
+  ) {
+    throw new TypeError("failure publication code is invalid");
+  }
+  return Object.freeze({
+    reviewRequest: validateQueuedReviewRequest(payload.reviewRequest),
+    failureCode: failureCode as AnalysisFailureCode,
+  });
+}
+
+function isFailurePublicationRequest(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(",") === "failureCode,reviewRequest"
+  );
 }
 
 export function validatePublicationRequest(value: unknown): PublicationRequest {

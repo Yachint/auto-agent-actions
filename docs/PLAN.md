@@ -129,6 +129,8 @@ Coalesce rapid updates. A newer head SHA supersedes older queued work. If an old
 
 Retry transient GitHub, Git, and Codex failures with exponential backoff. Do not retry permanent validation or authorization failures indefinitely.
 
+After bounded analysis attempts are exhausted, route a sanitized terminal-failure notification through the privileged publication boundary. The notification must be revalidated against the current head, contain no inline findings or raw exception details, and explicitly state that no review conclusion was produced. Reconciliation must be able to enqueue the same failed head with a fresh queue delivery identity even while historical failed jobs are retained.
+
 ## Repository and worktree management
 
 Maintain one bare mirror per repository under a configurable data directory. Create a disposable detached worktree for each review.
@@ -147,6 +149,8 @@ Fetch the base branch and PR head ref, then create a detached worktree at the ex
 ```bash
 git diff <base-sha> <head-sha>
 ```
+
+If the base branch advances after the API snapshot is captured, use the exact captured base commit when it is present in the fetched history. Fail closed if that exact commit cannot be resolved or if the fetched PR head does not match the expected head.
 
 Delete disposable worktrees after completion. The analysis service removes allowlisted, safely-contained abandoned worktrees older than a configurable safety threshold at startup.
 

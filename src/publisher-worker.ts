@@ -8,7 +8,7 @@ import { ReadTokenBrokerServer } from "./github/read-token-broker.js";
 import { RedisOperationalMetrics } from "./observability/metrics.js";
 import {
   BullMqPublicationQueue,
-  type PublicationRequest,
+  type PublicationJob,
 } from "./queue/publication-queue.js";
 import { BullMqReviewQueue } from "./queue/bullmq-review-queue.js";
 import { RedisReviewStateStore } from "./queue/redis-review-state.js";
@@ -58,7 +58,7 @@ const processor = new PublicationJobProcessor(
     publishEmptySummary: config.publishSummaryWithoutFindings,
   },
 );
-const worker = new Worker<PublicationRequest, string, "publish">(
+const worker = new Worker<PublicationJob, string, "publish" | "notify-failure">(
   config.publicationQueueName,
   async (job) => {
     try {

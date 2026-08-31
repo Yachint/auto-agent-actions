@@ -15,6 +15,7 @@ describe("pull request reconciliation", () => {
         }),
       },
       reviewQueue: { enqueue },
+      now: () => new Date("2026-08-31T18:00:00.000Z"),
       createPullRequestClient: () => ({
         listOpenPullRequests: vi.fn().mockResolvedValue([
           {
@@ -53,6 +54,38 @@ describe("pull request reconciliation", () => {
       action: "synchronize",
       headSha: "a".repeat(40),
     });
+  });
+
+  it("uses a fresh delivery identity on each run so a retained failed job cannot block recovery", async () => {
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    let now = new Date("2026-08-31T18:00:00.000Z");
+    const processor = new ReconciliationProcessor({
+      allowedRepositories: new Set(["owner/project"]),
+      installationProvider: { getRepositoryInstallationId: vi.fn().mockResolvedValue(77) },
+      tokenProvider: {
+        getToken: vi.fn().mockResolvedValue({ token: "read-token", expiresAt: new Date() }),
+      },
+      reviewQueue: { enqueue },
+      now: () => now,
+      createPullRequestClient: () => ({
+        listOpenPullRequests: vi.fn().mockResolvedValue([
+          {
+            pullRequestNumber: 7,
+            draft: false,
+            headSha: "a".repeat(40),
+            headRepository: "owner/project",
+          },
+        ]),
+      }),
+    });
+
+    await processor.run();
+    now = new Date("2026-08-31T18:15:00.000Z");
+    await processor.run();
+
+    const firstDelivery = enqueue.mock.calls[0]![0].deliveryId;
+    const secondDelivery = enqueue.mock.calls[1]![0].deliveryId;
+    expect(firstDelivery).not.toBe(secondDelivery);
   });
 
   it("continues after one repository fails without exposing error details", async () => {

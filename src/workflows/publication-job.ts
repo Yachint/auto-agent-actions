@@ -5,7 +5,10 @@ import {
   type PublisherOptions,
 } from "../github/publisher.js";
 import {
+  validatePublicationJob,
   validatePublicationRequest,
+  type FailurePublicationRequest,
+  type PublicationJob,
   type PublicationRequest,
 } from "../queue/publication-queue.js";
 import {
@@ -22,7 +25,12 @@ export interface PublicationJobDependencies {
   readonly createReviewClient?: (token: string) => GitHubReviewClient;
 }
 
-export type PublicationJobResult = "published" | "skipped" | "superseded" | "ineligible";
+export type PublicationJobResult =
+  | "published"
+  | "failure-notified"
+  | "skipped"
+  | "superseded"
+  | "ineligible";
 
 export class PublicationJobProcessor {
   readonly #dependencies: PublicationJobDependencies;
@@ -37,7 +45,8 @@ export class PublicationJobProcessor {
   }
 
   async process(value: unknown): Promise<PublicationJobResult> {
-    const publication = validatePublicationRequest(value);
+    const publication = validatePublicationJob(value);
+    if ("failureCode" in publication) return this.#publishFailure(publication);
     const request = publication.reviewRequest;
     if (!this.#dependencies.allowedRepositories.has(request.repository)) {
       throw new TypeError("publication repository is not allowlisted");
@@ -95,8 +104,34 @@ export class PublicationJobProcessor {
     return "ineligible";
   }
 
+  async #publishFailure(publication: FailurePublicationRequest): Promise<PublicationJobResult> {
+    const request = publication.reviewRequest;
+    if (!this.#dependencies.allowedRepositories.has(request.repository)) {
+      throw new TypeError("failure publication repository is not allowlisted");
+    }
+    const installationToken = await this.#dependencies.tokenProvider.getToken(
+      request.installationId,
+      request.repository,
+      "review-write",
+    );
+    const client =
+      this.#dependencies.createReviewClient?.(installationToken.token) ??
+      new GitHubRestClient({ installationToken: installationToken.token });
+    const result = await new GitHubReviewPublisher(client, this.#publisherOptions).publishFailure({
+      repository: request.repository,
+      pullRequestNumber: request.pullRequestNumber,
+      headSha: request.headSha,
+      failureCode: publication.failureCode,
+    });
+    if (result.status === "published") return "failure-notified";
+    if (result.status === "stale") return "superseded";
+    return "ineligible";
+  }
+
   async markFailed(value: unknown): Promise<void> {
-    const publication: PublicationRequest = validatePublicationRequest(value);
+    const job: PublicationJob = validatePublicationJob(value);
+    if ("failureCode" in job) return;
+    const publication: PublicationRequest = validatePublicationRequest(job);
     await this.#dependencies.stateStore.fail(
       publication.reviewRequest.repository,
       publication.reviewRequest.pullRequestNumber,

@@ -2,15 +2,17 @@ import { createIORedisClient, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { pino } from "pino";
 
-import { verifyCodexReadOnlySandbox } from "./codex/runner.js";
+import { CodexExecutionError, verifyCodexReadOnlySandbox } from "./codex/runner.js";
 import { loadAnalysisWorkerConfig } from "./config/runtime.js";
 import { ReadTokenBrokerClient } from "./github/read-token-broker.js";
 import { RedisOperationalMetrics } from "./observability/metrics.js";
 import { BullMqPublicationQueue } from "./queue/publication-queue.js";
+import type { AnalysisFailureCode } from "./queue/publication-queue.js";
 import { BullMqReviewQueue } from "./queue/bullmq-review-queue.js";
 import type { ReviewRequest } from "./queue/review-queue.js";
 import { RedisReviewStateStore } from "./queue/redis-review-state.js";
 import { RepositoryManager } from "./repositories/manager.js";
+import { StaleReviewRefError } from "./repositories/manager.js";
 import { AnalysisJobProcessor } from "./workflows/analysis-job.js";
 
 const config = await loadAnalysisWorkerConfig();
@@ -75,6 +77,24 @@ const worker = new Worker<ReviewRequest, string, "review">(
       return result;
     } catch (error) {
       await recordMetric("analysis_failed_total");
+      if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
+        await publicationQueue
+          .enqueueFailure({
+            reviewRequest: job.data,
+            failureCode: classifyFailure(error),
+          })
+          .catch(async (publicationError: unknown) => {
+            await recordMetric("analysis_failure_notification_enqueue_failed_total");
+            logger.error(
+              {
+                jobId: job.id,
+                errorName:
+                  publicationError instanceof Error ? publicationError.name : "unknown",
+              },
+              "could not enqueue terminal analysis failure notification",
+            );
+          });
+      }
       throw error;
     } finally {
       await recordMetric("analysis_duration_ms_total", Date.now() - startedAt);
@@ -83,6 +103,14 @@ const worker = new Worker<ReviewRequest, string, "review">(
   },
   { connection: redis, concurrency: config.concurrency },
 );
+
+function classifyFailure(error: unknown): AnalysisFailureCode {
+  if (error instanceof StaleReviewRefError) {
+    return error.refName === "base" ? "base-ref-changed" : "head-ref-changed";
+  }
+  if (error instanceof CodexExecutionError && /timeout/i.test(error.message)) return "timeout";
+  return "analysis-failed";
+}
 
 worker.on("completed", (job, result) => {
   logger.info({ jobId: job.id, result }, "analysis job completed");

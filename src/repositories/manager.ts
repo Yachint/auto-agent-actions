@@ -45,7 +45,7 @@ export interface ReviewWorktree {
 }
 
 export class StaleReviewRefError extends Error {
-  constructor(refName: "base" | "head") {
+  constructor(readonly refName: "base" | "head") {
     super(`Fetched ${refName} ref no longer matches the expected SHA`);
     this.name = "StaleReviewRefError";
   }
@@ -88,16 +88,24 @@ export class RepositoryManager {
       });
     });
 
-    const [baseSha, headSha] = await Promise.all([
+    const [fetchedBaseSha, headSha] = await Promise.all([
       this.resolveCommit(mirrorPath, baseRef),
       this.resolveCommit(mirrorPath, headRef),
     ]);
 
-    if (baseSha !== input.expectedBaseSha.toLowerCase()) {
-      throw new StaleReviewRefError("base");
-    }
     if (headSha !== input.expectedHeadSha.toLowerCase()) {
       throw new StaleReviewRefError("head");
+    }
+
+    const expectedBaseSha = input.expectedBaseSha.toLowerCase();
+    let baseSha = fetchedBaseSha;
+    if (fetchedBaseSha !== expectedBaseSha) {
+      try {
+        baseSha = await this.resolveCommit(mirrorPath, expectedBaseSha);
+      } catch {
+        throw new StaleReviewRefError("base");
+      }
+      if (baseSha !== expectedBaseSha) throw new StaleReviewRefError("base");
     }
 
     return { mirrorPath, baseSha, headSha };

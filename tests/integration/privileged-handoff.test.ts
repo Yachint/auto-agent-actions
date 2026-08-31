@@ -82,7 +82,10 @@ describe("privilege-separated analysis to publication handoff", () => {
     const state = new InMemoryReviewStateStore();
     await state.recordRequested("owner/project", 7, headSha);
     const tokens = tokenProvider();
-    const publications = { enqueue: vi.fn().mockResolvedValue(undefined) };
+    const publications = {
+      enqueue: vi.fn().mockResolvedValue(undefined),
+      enqueueFailure: vi.fn().mockResolvedValue(undefined),
+    };
     const runReview = vi.fn().mockResolvedValue({
       baseSha,
       headSha,
@@ -151,7 +154,7 @@ describe("privilege-separated analysis to publication handoff", () => {
         stateStore: state,
         tokenProvider: tokenProvider(),
         reviewQueue: reviews,
-        publicationQueue: { enqueue: vi.fn() },
+        publicationQueue: { enqueue: vi.fn(), enqueueFailure: vi.fn() },
         createRepositoryClient: () => ({
           getPullRequestDetails: vi.fn().mockResolvedValue(pullRequest(newHeadSha)),
         }),
@@ -231,6 +234,46 @@ describe("privilege-separated analysis to publication handoff", () => {
     expect(client.createReview).not.toHaveBeenCalled();
     expect(reviews.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ headSha: newHeadSha }),
+    );
+  });
+
+  it("publishes a sanitized terminal analysis failure through write-only scope", async () => {
+    const state = new InMemoryReviewStateStore();
+    await state.recordRequested("owner/project", 7, headSha);
+    await state.tryStart("owner/project", 7, headSha);
+    await state.fail("owner/project", 7, headSha);
+    const tokens = tokenProvider();
+    const client: GitHubReviewClient = {
+      getPullRequest: vi.fn().mockResolvedValue({
+        state: "open",
+        draft: false,
+        headSha,
+        headRepository: "owner/project",
+      }),
+      createReview: vi.fn().mockResolvedValue({ reviewId: 43 }),
+    };
+    const processor = new PublicationJobProcessor({
+      allowedRepositories: new Set(["owner/project"]),
+      stateStore: state,
+      tokenProvider: tokens,
+      reviewQueue: reviewQueue(),
+      createReviewClient: () => client,
+    });
+
+    await expect(
+      processor.process({ reviewRequest, failureCode: "timeout" }),
+    ).resolves.toBe("failure-notified");
+    expect(tokens.getToken).toHaveBeenCalledWith(77, "owner/project", "review-write");
+    expect(client.createReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commitId: headSha,
+        event: "COMMENT",
+        comments: [],
+        body: expect.stringContaining("No review conclusion was produced"),
+      }),
+    );
+    expect(await state.get("owner/project", 7)).toEqual(
+      expect.objectContaining({ status: "failed", lastReviewedHeadSha: null }),
     );
   });
 });

@@ -177,6 +177,26 @@ describe("repository manager and exact diff inspection", () => {
     ).rejects.toThrow(StaleReviewRefError);
   });
 
+  it("uses the exact captured base commit when the base branch advances during fetch", async () => {
+    await git(fixture.sourcePath, ["switch", "main"]);
+    await writeFile(path.join(fixture.sourcePath, "base-advanced.txt"), "new base tip\n");
+    await git(fixture.sourcePath, ["add", "base-advanced.txt"]);
+    await git(fixture.sourcePath, ["commit", "-m", "advance base"]);
+    const manager = new RepositoryManager({ dataDirectory: fixture.dataPath });
+
+    const fetched = await manager.fetchReviewRefs({
+      repository: "example/project",
+      remoteUrl: fixture.sourcePath,
+      baseBranch: "main",
+      pullRequestNumber: 7,
+      expectedBaseSha: fixture.baseSha,
+      expectedHeadSha: fixture.headSha,
+    });
+
+    expect(fetched.baseSha).toBe(fixture.baseSha);
+    expect(fetched.headSha).toBe(fixture.headSha);
+  });
+
   it("rejects embedded remote credentials before running Git", async () => {
     const manager = new RepositoryManager({ dataDirectory: fixture.dataPath });
 
