@@ -126,6 +126,20 @@ function validateFinding(
   const issues: ValidationIssue[] = [];
   const location = `/findings/${index}`;
 
+  if (finding.title.trim().length === 0) {
+    issues.push({
+      location: `${location}/title`,
+      message: "must contain non-whitespace text",
+    });
+  }
+
+  if (finding.body.trim().length === 0) {
+    issues.push({
+      location: `${location}/body`,
+      message: "must contain non-whitespace text",
+    });
+  }
+
   if (!isSafeRepositoryPath(finding.path)) {
     issues.push({
       location: `${location}/path`,

@@ -59,6 +59,18 @@ describe("review output validation", () => {
     ).toThrow(ReviewOutputValidationError);
   });
 
+  it.each(["title", "body"] as const)(
+    "rejects whitespace-only finding %s",
+    (field) => {
+      expect(() =>
+        validateReviewOutput({
+          ...validOutput,
+          findings: [{ ...validOutput.findings[0], [field]: "   \n" }],
+        }),
+      ).toThrow(/must contain non-whitespace text/);
+    },
+  );
+
   it.each(["/etc/passwd", "../secret", "src/../secret", "C:/secret"])(
     "rejects unsafe repository path %s",
     (unsafePath) => {

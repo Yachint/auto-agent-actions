@@ -27,6 +27,20 @@ describe("Codex review output schema", () => {
       expect.objectContaining({ type: ["string", "null"] }),
     );
   });
+
+  it("bounds finding count and comment field sizes", () => {
+    expect(isRecord(schema)).toBe(true);
+    if (!isRecord(schema) || !isRecord(schema.properties)) return;
+    const findings = schema.properties.findings;
+    expect(findings).toEqual(expect.objectContaining({ maxItems: 50 }));
+    if (!isRecord(findings) || !isRecord(findings.items)) return;
+    const properties = findings.items.properties;
+    if (!isRecord(properties)) return;
+
+    expect(properties.title).toEqual(expect.objectContaining({ maxLength: 160 }));
+    expect(properties.body).toEqual(expect.objectContaining({ maxLength: 4000 }));
+    expect(properties.path).toEqual(expect.objectContaining({ maxLength: 1024 }));
+  });
 });
 
 function assertStrictObjectSchemas(value: unknown, location = "$"): void {

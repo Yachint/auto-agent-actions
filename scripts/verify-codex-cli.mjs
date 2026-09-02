@@ -11,6 +11,17 @@ const REQUIRED_EXEC_FLAGS = [
   "--output-last-message",
 ];
 
+const REVIEW_CONFIG_ARGS = [
+  "-c",
+  "features.use_legacy_landlock=true",
+  "-c",
+  "agents.enabled=true",
+  "-c",
+  "agents.max_concurrent_threads_per_session=3",
+  "-c",
+  "agents.max_depth=1",
+];
+
 export function verifyCodexHelp(helpText) {
   const missing = REQUIRED_EXEC_FLAGS.filter((flag) => !helpText.includes(flag));
   if (missing.length > 0) {
@@ -28,7 +39,10 @@ function main() {
     throw new Error("installed Codex CLI version does not match CODEX_CLI_VERSION");
   }
   verifyCodexHelp(runCodex(["exec", "--help"]));
-  process.stdout.write(`PASS Codex CLI ${expectedVersion} supports the locked-down runner flags\n`);
+  runCodex([...REVIEW_CONFIG_ARGS, "exec", "--strict-config", "--help"]);
+  process.stdout.write(
+    `PASS Codex CLI ${expectedVersion} supports the locked-down runner flags and review configuration\n`,
+  );
 }
 
 function runCodex(args) {

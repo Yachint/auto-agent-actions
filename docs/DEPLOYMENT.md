@@ -32,7 +32,7 @@ cp .env.vps.example .env.vps
 chmod 600 .env.vps
 ```
 
-Set `CODEX_CLI_VERSION` to the exact tested CLI version reported by `codex --version`. Keep the Redis image version pinned; after validation, prefer an immutable image digest.
+Set `CODEX_CLI_VERSION=0.151.0`, the release currently validated by this application. Upgrade it only after the image-build compatibility check, read-only sandbox smoke test, structured-output review path, and full application suite pass. Keep the Redis image version pinned; after validation, prefer immutable image digests.
 
 Set `APP_UID` and `APP_GID` in `.env.vps` to the numeric IDs reported by `id -u` and `id -g` for the deployment administrator. The image builds its unprivileged runtime account with those IDs so file-backed Compose secrets and the Codex credential bind mount remain readable without granting another host account access.
 

@@ -75,6 +75,11 @@ describe("Codex review runner", () => {
     expect(capturedInvocation?.args).toContain('approval_policy="never"');
     expect(capturedInvocation?.args).toContain('web_search="disabled"');
     expect(capturedInvocation?.args).toContain("features.apps=false");
+    expect(capturedInvocation?.args).toContain("agents.enabled=true");
+    expect(capturedInvocation?.args).toContain(
+      "agents.max_concurrent_threads_per_session=3",
+    );
+    expect(capturedInvocation?.args).toContain("agents.max_depth=1");
     expect(capturedInvocation?.args).toContain('model_reasoning_effort="high"');
     expect(capturedInvocation?.args).toContain(
       `model_instructions_file=${JSON.stringify(fixture.instructionsPath)}`,
@@ -295,6 +300,22 @@ describe("Codex review runner", () => {
     });
 
     expect(args).toContain("features.use_legacy_landlock=true");
+  });
+
+  it("enables bounded subagent review despite ignored user configuration", () => {
+    const args = buildCodexArgs({
+      worktreePath: "/tmp/worktree",
+      schemaPath: "/trusted/review-schema.json",
+      instructionsPath: "/trusted/review-instructions.md",
+      outputPath: "/trusted/review-output.json",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+    });
+
+    expect(args).toContain("--ignore-user-config");
+    expect(args).toContain("agents.enabled=true");
+    expect(args).toContain("agents.max_concurrent_threads_per_session=3");
+    expect(args).toContain("agents.max_depth=1");
   });
 
   it("requires trusted artifacts and output to be outside the worktree", async () => {

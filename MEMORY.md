@@ -171,6 +171,16 @@ This file is the durable, chronological handoff for future development sessions.
 - Exhausted analysis attempts enqueue a validated failure-notification job for the privileged publisher. The publisher rechecks the current head and posts one sanitized summary-only `COMMENT` review stating that no conclusion was produced; stale heads, closed/draft PRs, forks, raw errors, and inline findings are excluded.
 - The production and default Codex analysis timeout is now 1,800,000 ms (30 minutes) for large pull requests.
 
+## 2026-09-02 — Evidence-led review prompt and Codex CLI 0.151.0
+
+- Refactored review guidance so stable trust, investigation, finding, calibration, delegation, and output policy lives once in the trusted instructions file; the generated prompt now contains only the immutable PR metadata and exact base-to-head scope.
+- Reviews now inventory the patch, trace affected behavior, require a concrete trigger/impact/causal explanation, attempt to disprove candidates, merge duplicate root causes, and format each surviving finding with trigger, impact, evidence, and remediation direction. Findings below 0.80 confidence are omitted.
+- Large, cross-cutting, or high-risk reviews may use up to three read-only subagents with behavior, security/operations, and verification lenses. Small coherent reviews remain single-agent; descendants are prohibited by instruction, all spawned agents must finish, and only the primary reviewer may validate and emit structured output.
+- Upgraded the production Codex CLI pin from 0.144.5 to 0.151.0. The locked-down invocation explicitly enables agents with the current canonical configuration, caps concurrent spawned threads at three, and limits delegation depth to one even while user configuration is ignored. The Landlock compatibility route remains forced because the VPS previously rejected nested Bubblewrap namespace setup; startup still proves that a real write is denied.
+- Structured output now also bounds finding count and comment field lengths and rejects whitespace-only titles or bodies.
+- Added a shadow-evaluation protocol covering clean, confirmed-bug, large, small, adversarial-injection, disproven-candidate, and difficult-anchor PRs. Material prompt/model/schema/delegation changes now require baseline comparison across review quality, safety, reliability, latency, and token metrics before deployment.
+- The exact 0.151.0 analysis image passed its build-time strict-config compatibility check, the protected deployment preflight, and a live container smoke test proving the forced Landlock read-only sandbox denies writes. The mounted Codex credential store remained authenticated.
+
 ## Unresolved decisions
 
 - The checked-in Compose stack still requires syntax/build/runtime validation on a Docker host, Redis backup/restore rehearsal, and host-level egress controls before public-repository launch.
