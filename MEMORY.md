@@ -180,9 +180,12 @@ This file is the durable, chronological handoff for future development sessions.
 - Structured output now also bounds finding count and comment field lengths and rejects whitespace-only titles or bodies.
 - Added a shadow-evaluation protocol covering clean, confirmed-bug, large, small, adversarial-injection, disproven-candidate, and difficult-anchor PRs. Material prompt/model/schema/delegation changes now require baseline comparison across review quality, safety, reliability, latency, and token metrics before deployment.
 - The exact 0.151.0 analysis image passed its build-time strict-config compatibility check, the protected deployment preflight, and a live container smoke test proving the forced Landlock read-only sandbox denies writes. The mounted Codex credential store remained authenticated.
+- The full 2026-09-02 verification passed TypeScript build, 144 standard tests, protected VPS preflight, Compose resolution, image build, exact-version and structured-output smoke tests, and runtime isolation/readiness checks. A revoked cached ChatGPT refresh token was discovered by a reconciled live job, reauthorized with device login, and then verified by a successful 0.151.0 structured-output request.
+- A current dependency audit initially found high-severity advisories in transitive `fast-uri` and `find-my-way` releases. The lockfile now selects patched compatible releases, and both production-only and full audits report zero known vulnerabilities.
 
 ## Unresolved decisions
 
-- The checked-in Compose stack still requires syntax/build/runtime validation on a Docker host, Redis backup/restore rehearsal, and host-level egress controls before public-repository launch.
-- Private GitHub App creation, installation, webhook delivery testing, and the first real advisory review require the owner.
+- Redis backup/restore rehearsal remains required for disaster-recovery confidence.
+- Host-level egress controls and a dedicated authentication boundary remain required before any public-repository launch.
+- A final canary PR on the upgraded prompt/CLI should confirm both a publishable finding and a clean summary-only result before broad switch-over.
 - Whether ChatGPT subscription authentication provides an acceptable security boundary for public repositories after the VPS isolation design is implemented and tested.

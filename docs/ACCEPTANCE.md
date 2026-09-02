@@ -20,18 +20,16 @@ This document separates locally verified behavior from checks that require the o
 | Missed webhooks are recovered | Reconciliation processor tests using the same durable queue/state idempotency path |
 | Crashed worktrees are cleaned without path escape | Repository cleanup tests |
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
-| Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` reported 0 vulnerabilities on 2026-07-16 |
+| Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` and the full `npm audit` reported 0 vulnerabilities on 2026-09-02 after updating the lockfile to patched transitive releases |
 
-The latest local verification completed with `npm run build` and 129 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed previously.
+The latest local verification completed with `npm run build` and 144 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed previously.
 
 ## Owner/VPS verification required
 
-1. Run `docker compose --env-file .env.vps config`, build all images on the VPS, and verify the explicit Codex read-only sandbox smoke command passes.
-2. Authenticate the pinned containerized Codex CLI into the dedicated `CODEX_HOME` and confirm `codex login status` without exposing `auth.json`.
-3. Create and install the private GitHub App on selected repositories with Contents read, Pull requests read/write, Metadata read, and the `pull_request` webhook.
-4. Configure the generated private key and webhook secret, start the stack, and confirm no project service publishes host ports and Traefik exposes only the exact webhook path.
-5. Deliver a signed test webhook, open a same-repository PR with a publishable finding, and verify exactly one correctly anchored `REQUEST_CHANGES` review against the current head. Then verify a clean new head receives a summary-only `COMMENT`.
-6. Push a replacement commit during a deliberately slow review and verify no review is posted for the obsolete SHA.
-7. Stop webhook delivery temporarily, push a commit, restore the stack, and confirm reconciliation recovers the missed head.
-8. Inspect logs and container environments/mounts for credential separation, then rehearse Redis backup and restore.
-9. Before enabling a public repository, add and verify host-level egress restrictions for analysis and publisher traffic.
+1. Deliver a signed test webhook against the new release, open a same-repository PR with a publishable finding, and verify exactly one correctly anchored `REQUEST_CHANGES` review against the current head. Then verify a clean new head receives a summary-only `COMMENT`.
+2. Push a replacement commit during a deliberately slow review and verify no review is posted for the obsolete SHA.
+3. Stop webhook delivery temporarily, push a commit, restore the stack, and confirm reconciliation recovers the missed head.
+4. Rehearse Redis backup and restore.
+5. Before enabling a public repository, add and verify host-level egress restrictions for analysis and publisher traffic.
+
+The VPS Compose configuration, image build, exact Codex 0.151.0 pin, read-only Landlock write-denial probe, containerized ChatGPT authentication, selected-repository GitHub App installation, restricted mounts/capabilities, internal readiness, and zero-restart startup were reverified on 2026-09-02.
