@@ -28,7 +28,7 @@
   "license": "MIT",
   "dependencies": {
     "ajv": "^8.20.0",
-    "bullmq": "^5.80.5",
+    "bullmq": "^6.3.9",
     "fastify": "^5.10.0",
     "ioredis": "^5.11.1",
     "pino": "^10.3.1"
