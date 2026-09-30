@@ -20,10 +20,17 @@ function request(headSha = oldHead, deliveryId = "delivery-1"): ReviewRequest {
 }
 
 describe("durable review queue behavior", () => {
-  it("configures latest-only per-PR BullMQ deduplication and bounded retries", async () => {
-    const queue = { add: vi.fn().mockResolvedValue({}), close: vi.fn().mockResolvedValue(undefined) };
+  it("uses repairable per-scope job identities and bounded retries", async () => {
+    const queue = {
+      add: vi.fn().mockResolvedValue({}),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
     const state = new InMemoryReviewStateStore();
-    const reviews = new BullMqReviewQueue({ queue, stateStore: state, debounceMs: 2_000 });
+    const reviews = new BullMqReviewQueue({
+      queue,
+      stateStore: state,
+      debounceMs: 2_000,
+    });
 
     await reviews.enqueue(request());
     await reviews.enqueue(request());
@@ -37,16 +44,11 @@ describe("durable review queue behavior", () => {
         delay: 2_000,
         attempts: 3,
         backoff: { type: "exponential", delay: 1_000 },
-        deduplication: expect.objectContaining({
-          extend: true,
-          replace: true,
-          keepLastIfActive: true,
-        }),
       }),
     );
     const firstOptions = queue.add.mock.calls[0]![2];
     const secondOptions = queue.add.mock.calls[1]![2];
-    expect(firstOptions.deduplication.id).toBe(secondOptions.deduplication.id);
+    expect(firstOptions.deduplication).toBeUndefined();
     expect(firstOptions.jobId).not.toBe(secondOptions.jobId);
   });
 
@@ -70,9 +72,9 @@ describe("durable review queue behavior", () => {
         status: "queued",
       }),
     );
-    await expect(runner.run(request(newHead, "delivery-2"), async () => {})).resolves.toBe(
-      "completed",
-    );
+    await expect(
+      runner.run(request(newHead, "delivery-2"), async () => {}),
+    ).resolves.toBe("completed");
   });
 
   it("records failure and permits the same head to be requested again", async () => {
@@ -85,9 +87,14 @@ describe("durable review queue behavior", () => {
       }),
     ).rejects.toThrow(/transient failure/);
     expect(await state.get("owner/project", 7)).toEqual(
-      expect.objectContaining({ status: "failed", currentlyRunningHeadSha: null }),
+      expect.objectContaining({
+        status: "failed",
+        currentlyRunningHeadSha: null,
+      }),
     );
-    await expect(state.recordRequested("owner/project", 7, oldHead)).resolves.toBe(true);
+    await expect(
+      state.recordRequested("owner/project", 7, oldHead),
+    ).resolves.toBe(true);
   });
 
   it("makes state retryable when BullMQ insertion fails", async () => {
@@ -101,8 +108,12 @@ describe("durable review queue behavior", () => {
     const state = new InMemoryReviewStateStore();
     const reviews = new BullMqReviewQueue({ queue, stateStore: state });
 
-    await expect(reviews.enqueue(request())).rejects.toThrow(/Redis unavailable/);
-    expect(await state.get("owner/project", 7)).toEqual(expect.objectContaining({ status: "failed" }));
+    await expect(reviews.enqueue(request())).rejects.toThrow(
+      /Redis unavailable/,
+    );
+    expect(await state.get("owner/project", 7)).toEqual(
+      expect.objectContaining({ status: "failed" }),
+    );
     await expect(reviews.enqueue(request())).resolves.toBeUndefined();
     expect(queue.add).toHaveBeenCalledTimes(2);
   });
@@ -112,7 +123,9 @@ describe("durable review queue behavior", () => {
     const process = vi.fn().mockResolvedValue(undefined);
     await state.recordRequested("owner/project", 7, oldHead);
     await state.recordRequested("owner/project", 7, newHead);
-    await expect(new ReviewJobRunner(state).run(request(), process)).resolves.toBe("superseded");
+    await expect(
+      new ReviewJobRunner(state).run(request(), process),
+    ).resolves.toBe("superseded");
     expect(process).not.toHaveBeenCalled();
   });
 
@@ -121,7 +134,9 @@ describe("durable review queue behavior", () => {
     const runner = new ReviewJobRunner(state);
     const process = vi.fn().mockResolvedValue(undefined);
     await state.recordRequested("owner/project", 7, oldHead);
-    await expect(runner.run(request(), async () => {})).resolves.toBe("completed");
+    await expect(runner.run(request(), async () => {})).resolves.toBe(
+      "completed",
+    );
 
     await expect(runner.run(request(), process)).resolves.toBe("superseded");
     expect(process).not.toHaveBeenCalled();

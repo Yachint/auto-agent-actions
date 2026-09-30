@@ -19,9 +19,9 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -88,6 +88,38 @@ describe("Codex review runner", () => {
       PATH: "/usr/bin",
       CODEX_API_KEY: "codex-secret",
     });
+  });
+
+  it.each([
+    undefined,
+    [],
+    [{ path: "file.ts", status: "uninspectable" }],
+    [{ path: "other.ts", status: "inspected" }],
+  ])("rejects incomplete or substituted coverage (%j)", async (coverage) => {
+    const fixture = await createFixture();
+    await expect(
+      runCodexReview({
+        ...fixture,
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        prompt: "Trusted inventory",
+        timeoutMs: 1000,
+        expectedPaths: ["file.ts"],
+        executor: async () => {
+          await writeFile(
+            fixture.outputPath,
+            JSON.stringify({
+              status: "completed",
+              blocked_reason: null,
+              findings: [],
+              summary: "Clean",
+              ...(coverage === undefined ? {} : { coverage }),
+            }),
+          );
+          return successfulResult();
+        },
+      }),
+    ).rejects.toMatchObject({ failureKind: "blocked" });
   });
 
   it("removes stale output before starting Codex", async () => {
@@ -185,9 +217,9 @@ describe("Codex review runner", () => {
     expect(result.exitCode).toBe(0);
     expect(result.signal).toBeNull();
     expect(result.outputTruncated).toBe(true);
-    expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBe(
-      128,
-    );
+    expect(
+      Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr),
+    ).toBe(128);
   });
 
   it("still rejects an oversized structured review output file", async () => {
@@ -273,9 +305,7 @@ describe("Codex review runner", () => {
           stderr: "bwrap: permissions denied\n",
         }),
       }),
-    ).rejects.toThrow(
-      /sandbox preflight failed: bwrap: permissions denied/,
-    );
+    ).rejects.toThrow(/sandbox preflight failed: bwrap: permissions denied/);
   });
 
   it("rejects worker startup when sandbox preflight diagnostics are truncated", async () => {
@@ -373,3 +403,20 @@ function successfulResult(): ProcessResult {
     outputTruncated: false,
   };
 }
+
+it("terminates descendant processes holding inherited output pipes", async () => {
+  const started = Date.now();
+  const result = await executeProcess({
+    command: process.execPath,
+    args: [
+      "-e",
+      "require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:'inherit'}); setTimeout(()=>{},5000)",
+    ],
+    stdin: "",
+    environment: { PATH: process.env.PATH },
+    timeoutMs: 100,
+    maxOutputBytes: 1024,
+  });
+  expect(result.timedOut).toBe(true);
+  expect(Date.now() - started).toBeLessThan(2000);
+});

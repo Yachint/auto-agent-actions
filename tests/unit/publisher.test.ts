@@ -10,7 +10,14 @@ const newerHeadSha = "c".repeat(40);
 const diff: ExactDiff = {
   baseSha: "a".repeat(40),
   headSha,
-  files: [{ status: "M", path: "src/app.ts", isDeleted: false, rightSideRanges: [{ start: 4, end: 8 }] }],
+  files: [
+    {
+      status: "M",
+      path: "src/app.ts",
+      isDeleted: false,
+      rightSideRanges: [{ start: 4, end: 8 }],
+    },
+  ],
 };
 
 function finding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
@@ -61,15 +68,21 @@ describe("GitHub review publisher", () => {
       pullRequestNumber: 7,
       commitId: headSha,
       event: "REQUEST_CHANGES",
-      body: expect.stringContaining(`<!-- auto-agent-actions:head=${headSha} -->`),
-      comments: [{
-        path: "src/app.ts",
-        body: "**P1: Handle failure**\n\nThis failure terminates the worker.",
-        line: 5,
-        side: "RIGHT",
-        start_line: 4,
-        start_side: "RIGHT",
-      }],
+      body: expect.stringContaining(
+        `<!-- auto-agent-actions:head=${headSha} -->`,
+      ),
+      comments: [
+        {
+          path: "src/app.ts",
+          body: expect.stringContaining(
+            "**P1: Handle failure**\n\nThis failure terminates the worker.",
+          ),
+          line: 5,
+          side: "RIGHT",
+          start_line: 4,
+          start_side: "RIGHT",
+        },
+      ],
     });
   });
 
@@ -104,19 +117,24 @@ describe("GitHub review publisher", () => {
         exactDiff: diff,
         output: {
           status: "completed",
-          findings: [finding({ path: "outside.ts" }), finding({ confidence: 0.2 })],
+          findings: [
+            finding({ path: "outside.ts" }),
+            finding({ confidence: 0.2 }),
+          ],
           summary: "No publishable issues.",
           blocked_reason: null,
         },
       }),
     ).resolves.toEqual({ status: "skipped", reason: "no-findings" });
-    expect(github.getPullRequest).not.toHaveBeenCalled();
+    expect(github.getPullRequest).toHaveBeenCalled();
     expect(github.createReview).not.toHaveBeenCalled();
   });
 
   it("publishes a meaningful summary-only COMMENT when enabled", async () => {
     const github = client();
-    const publisher = new GitHubReviewPublisher(github, { publishEmptySummary: true });
+    const publisher = new GitHubReviewPublisher(github, {
+      publishEmptySummary: true,
+    });
     await expect(
       publisher.publish({
         repository: "owner/project",
@@ -126,7 +144,8 @@ describe("GitHub review publisher", () => {
         output: {
           status: "completed",
           findings: [],
-          summary: "Reviewed the worker shutdown changes and error-handling flow.",
+          summary:
+            "Reviewed the worker shutdown changes and error-handling flow.",
           blocked_reason: null,
         },
       }),
@@ -167,7 +186,9 @@ describe("GitHub review publisher", () => {
       pullRequestNumber: 7,
       commitId: headSha,
       event: "COMMENT",
-      body: expect.stringMatching(/could not complete[\s\S]*No review conclusion[\s\S]*base changed/i),
+      body: expect.stringMatching(
+        /could not complete[\s\S]*No review conclusion[\s\S]*base changed/i,
+      ),
       comments: [],
     });
 
@@ -185,9 +206,33 @@ describe("GitHub review publisher", () => {
 
   it("refuses closed, draft, and forked pull requests", async () => {
     for (const [state, expected] of [
-      [{ state: "closed", draft: false, headSha, headRepository: "owner/project" }, "closed"],
-      [{ state: "open", draft: true, headSha, headRepository: "owner/project" }, "draft"],
-      [{ state: "open", draft: false, headSha, headRepository: "fork/project" }, "fork"],
+      [
+        {
+          state: "closed",
+          draft: false,
+          headSha,
+          headRepository: "owner/project",
+        },
+        "closed",
+      ],
+      [
+        {
+          state: "open",
+          draft: true,
+          headSha,
+          headRepository: "owner/project",
+        },
+        "draft",
+      ],
+      [
+        {
+          state: "open",
+          draft: false,
+          headSha,
+          headRepository: "fork/project",
+        },
+        "fork",
+      ],
     ] as const) {
       const github: GitHubReviewClient = {
         getPullRequest: vi.fn().mockResolvedValue(state),

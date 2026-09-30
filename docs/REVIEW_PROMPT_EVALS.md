@@ -62,3 +62,12 @@ A candidate prompt is eligible for deployment only when:
 - at least one maintainer reviews the comparison and records the decision in `MEMORY.md`.
 
 Roll out accepted prompt changes in shadow mode first when practical, then monitor review latency, failures, stale-result discards, findings published, and maintainer overrides.
+
+
+## Implemented evaluation runner (September 2026)
+
+Use private immutable bundles with `review:fixture --snapshot` and `review:evaluate` rather than fetching historical PR refs from GitHub. [PIPELINE_V2.md](PIPELINE_V2.md) documents manifest fields, one-to-one label matching, sanitized reports and optional candidate settings. Set `CODEX_BINARY` to the tested CLI executable. Compare CLI/policy/bundle identities in reports and manually adjudicate score matches before changing production model/effort defaults.
+
+## Isolation parity
+
+Local fixture and evaluation runs use the same strict `REVIEW_ISOLATE_CODEX` / `REVIEW_SANDBOX_BINARY` configuration loader as the analysis worker. An explicitly configured sandbox binary enables isolation. Evaluation reports include the actual `isolated` mode, and the policy hash normalizes the effective isolation mode and the evaluation's fixed 30-minute timeout. Set the isolation environment explicitly when comparing private evaluation results with production; malformed configuration fails before execution.

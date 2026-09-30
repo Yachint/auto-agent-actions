@@ -15,14 +15,14 @@ This document separates locally verified behavior from checks that require the o
 | GitHub App private key is absent from the analysis configuration/process | Runtime configuration tests and separate entry-point dependency boundaries |
 | Private Git fetch credentials are not persisted in URLs, arguments, config, or helper files | Repository manager authentication tests |
 | Only exact right-side changed lines can be published | Exact diff parser, output validator, persisted publication-payload validator, and publisher tests |
-| Reviews with publishable findings use `REQUEST_CHANGES`; successful zero-finding reviews post a visible `COMMENT` summary | REST client, publisher, and privileged-handoff tests |
+| Reviews with publishable P0/P1 findings use `REQUEST_CHANGES`; P2/P3 are advisory; successful zero-finding reviews post a visible `COMMENT` summary | REST client, publisher, and privileged-handoff tests |
 | A blocked or incomplete Codex inspection cannot enter the publication queue | Structured-output, runner, and persisted publication-payload tests |
 | Missed webhooks are recovered | Reconciliation processor tests using the same durable queue/state idempotency path |
 | Crashed worktrees are cleaned without path escape | Repository cleanup tests |
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` and the full `npm audit` reported 0 vulnerabilities on 2026-09-02 after updating the lockfile to patched transitive releases |
 
-The latest local verification completed with `npm run build` and 144 passing standard tests. One real Unix-socket integration test is opt-in because the normal development sandbox forbids sockets; it was run outside that sandbox and passed previously.
+The 2026-09-30 update passed TypeScript build and 177 tests under Node 24, including opt-in real Redis/BullMQ recovery, Unix-socket and native isolation tests. Both runtime images build. Codex CLI 0.155.1 passes strict configuration, hardened read-only preflight and a synthetic isolated diff-inspection/write-denial/coverage canary. Full dependency audit reports zero vulnerabilities on this date. These checks use synthetic fixtures and no private App or live model calls. See [PIPELINE_V2.md](PIPELINE_V2.md) for current recovery semantics, optional features, limits and coordinated migration requirements.
 
 ## Owner/VPS verification required
 
@@ -32,4 +32,7 @@ The latest local verification completed with `npm run build` and 144 passing sta
 4. Rehearse Redis backup and restore.
 5. Before enabling a public repository, add and verify host-level egress restrictions for analysis and publisher traffic.
 
-The VPS Compose configuration, image build, exact Codex 0.151.0 pin, read-only Landlock write-denial probe, containerized ChatGPT authentication, selected-repository GitHub App installation, restricted mounts/capabilities, internal readiness, and zero-restart startup were reverified on 2026-09-02.
+Historical deployment evidence (2026-09-02): the VPS Compose configuration, image build, exact Codex 0.151.0 pin, read-only Landlock write-denial probe, containerized ChatGPT authentication, selected-repository GitHub App installation, restricted mounts/capabilities, internal readiness, and zero-restart startup were reverified on 2026-09-02.
+
+
+The September 30 code has not been deployed. Before promotion, validate live account/API routing and credential renewal, retarget and in-flight push races, ambiguous review POST recovery, and optional Checks/comment authorization if enabled. Per-job cgroup termination and closed-repository mirror/state retention remain future operational work; filesystem metadata is not hidden by the native boundary, and port-only TCP filtering requires host egress rules against same-port remote destinations.

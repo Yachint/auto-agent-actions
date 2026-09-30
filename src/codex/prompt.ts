@@ -2,6 +2,7 @@ export interface ReviewPromptInput {
   repository: string;
   pullRequestNumber: number;
   baseSha: string;
+  mergeBaseSha?: string;
   headSha: string;
 }
 
@@ -14,6 +15,9 @@ export function buildReviewPrompt(input: ReviewPromptInput): string {
 
   const baseSha = input.baseSha.toLowerCase();
   const headSha = input.headSha.toLowerCase();
+  const comparisonSha = (input.mergeBaseSha ?? input.baseSha).toLowerCase();
+  if (!FULL_GIT_SHA_PATTERN.test(comparisonSha))
+    throw new TypeError("invalid merge base SHA");
 
   return `<review_task>
 <objective>Review the changes introduced by this pull request and report only verified, actionable defects.</objective>
@@ -23,10 +27,11 @@ Repository: ${input.repository}
 Pull request: #${input.pullRequestNumber}
 Base SHA: ${baseSha}
 Head SHA: ${headSha}
+Comparison SHA (frozen merge base): ${comparisonSha}
 </trusted_metadata>
 
 <exact_scope>
-Review only the changes between the exact base and head SHAs above. Begin with the right-hand side of \`git diff ${baseSha} ${headSha}\`. Inspect surrounding repository code only as needed to trace the behavior of changed lines. Do not substitute a branch tip, merge base, or different commit.
+Review only the changes between the frozen comparison SHA and head SHA above. Begin with the right-hand side of \`git diff ${comparisonSha} ${headSha}\`. The base tip is provenance, not the comparison start. Inspect surrounding repository code only as needed to trace the behavior of changed lines. Do not substitute a branch tip or different commit. Use literal Git pathspecs when inspecting repository filenames.
 </exact_scope>
 
 <completion>

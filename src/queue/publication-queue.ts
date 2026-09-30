@@ -8,34 +8,64 @@ import {
   validateCompletedReviewOutput,
   type CompletedReviewOutput,
 } from "../validation/review-output.js";
-import { validateQueuedReviewRequest, type ReviewRequest } from "./review-queue.js";
+import {
+  validateQueuedReviewRequest,
+  type ReviewRequest,
+} from "./review-queue.js";
 
 export interface PublicationRequest {
   readonly reviewRequest: ReviewRequest;
   readonly exactDiff: ExactDiff;
   readonly output: CompletedReviewOutput;
+  readonly rejectedFindingCount?: number;
 }
 
 export type AnalysisFailureCode =
   | "base-ref-changed"
   | "head-ref-changed"
   | "timeout"
-  | "analysis-failed";
+  | "analysis-failed"
+  | "inspection-blocked";
 
 export interface FailurePublicationRequest {
   readonly reviewRequest: ReviewRequest;
   readonly failureCode: AnalysisFailureCode;
+  readonly attemptId?: string;
 }
 
-export type PublicationJob = PublicationRequest | FailurePublicationRequest;
+export interface StatusPublicationRequest {
+  readonly reviewRequest: ReviewRequest;
+  readonly stage: "queued" | "running";
+}
+export interface CommentCommandRequest {
+  readonly reviewRequest: ReviewRequest;
+  readonly commentId: number;
+}
+
+export type PublicationJob =
+  | PublicationRequest
+  | FailurePublicationRequest
+  | StatusPublicationRequest
+  | CommentCommandRequest;
 
 export interface PublicationQueue {
   enqueue(request: PublicationRequest): Promise<void>;
+  enqueueCommand?(request: CommentCommandRequest): Promise<void>;
+  enqueueStatus?(request: StatusPublicationRequest): Promise<void>;
   enqueueFailure(request: FailurePublicationRequest): Promise<void>;
 }
 
 interface QueueLike {
-  add(name: "publish" | "notify-failure", data: PublicationJob, options: JobsOptions): Promise<unknown>;
+  getJob?(
+    id: string,
+  ): Promise<
+    { getState(): Promise<string>; remove(): Promise<void> } | undefined
+  >;
+  add(
+    name: "publish" | "notify-failure" | "status" | "command",
+    data: PublicationJob,
+    options: JobsOptions,
+  ): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -53,12 +83,17 @@ export class BullMqPublicationQueue implements PublicationQueue {
       this.#queue = options.queue;
     } else {
       if (options.connection === undefined) {
-        throw new TypeError("connection is required when queue is not injected");
+        throw new TypeError(
+          "connection is required when queue is not injected",
+        );
       }
-      this.#queue = new Queue<PublicationJob, unknown, "publish" | "notify-failure">(
-        options.queueName ?? "pull-request-publications",
-        { connection: options.connection },
-      );
+      this.#queue = new Queue<
+        PublicationJob,
+        unknown,
+        "publish" | "notify-failure" | "status" | "command"
+      >(options.queueName ?? "pull-request-publications", {
+        connection: options.connection,
+      });
     }
   }
 
@@ -66,17 +101,50 @@ export class BullMqPublicationQueue implements PublicationQueue {
     const request = validatePublicationRequest(value);
     const jobId = createHash("sha256")
       .update(
-        `${request.reviewRequest.repository}#${request.reviewRequest.pullRequestNumber}#${request.reviewRequest.headSha}`,
+        `${request.reviewRequest.repository}#${request.reviewRequest.pullRequestNumber}#${request.reviewRequest.headSha}#${request.reviewRequest.deliveryId}`,
       )
       .digest("hex");
+    const previous = await this.#queue.getJob?.(jobId);
+    if (previous !== undefined && (await previous.getState()) === "failed")
+      await previous.remove();
     await this.#queue.add("publish", request, {
       jobId,
       attempts: 3,
       backoff: { type: "exponential", delay: 1_000 },
-      removeOnComplete: { age: 30 * 24 * 60 * 60, count: 10_000 },
-      removeOnFail: { age: 30 * 24 * 60 * 60, count: 10_000 },
+      removeOnComplete: { age: 30 * 24 * 60 * 60, count: 1_000 },
+      removeOnFail: { age: 30 * 24 * 60 * 60, count: 1_000 },
       sizeLimit: 1024 * 1024,
       stackTraceLimit: 5,
+    });
+  }
+
+  async enqueueCommand(value: CommentCommandRequest): Promise<void> {
+    const request = validatePublicationJob(value);
+    await this.#queue.add("command", request, {
+      jobId: createHash("sha256")
+        .update(`command#${value.reviewRequest.repository}#${value.commentId}`)
+        .digest("hex"),
+      attempts: 3,
+      backoff: { type: "exponential", delay: 1000 },
+      removeOnComplete: { age: 86400, count: 1000 },
+      removeOnFail: { age: 86400, count: 1000 },
+      sizeLimit: 16384,
+    });
+  }
+
+  async enqueueStatus(value: StatusPublicationRequest): Promise<void> {
+    const request = validatePublicationJob(value);
+    await this.#queue.add("status", request, {
+      jobId: createHash("sha256")
+        .update(
+          `status#${value.stage}#${value.reviewRequest.scopeSha ?? value.reviewRequest.headSha}#${value.reviewRequest.deliveryId}`,
+        )
+        .digest("hex"),
+      attempts: 3,
+      backoff: { type: "exponential", delay: 1000 },
+      removeOnComplete: true,
+      removeOnFail: { age: 86400, count: 1000 },
+      sizeLimit: 16384,
     });
   }
 
@@ -84,15 +152,18 @@ export class BullMqPublicationQueue implements PublicationQueue {
     const request = validateFailurePublicationRequest(value);
     const jobId = createHash("sha256")
       .update(
-        `failure#${request.reviewRequest.repository}#${request.reviewRequest.pullRequestNumber}#${request.reviewRequest.headSha}`,
+        `failure#${request.reviewRequest.repository}#${request.reviewRequest.pullRequestNumber}#${request.reviewRequest.headSha}#${request.reviewRequest.deliveryId}`,
       )
       .digest("hex");
+    const previous = await this.#queue.getJob?.(jobId);
+    if (previous !== undefined && (await previous.getState()) === "failed")
+      await previous.remove();
     await this.#queue.add("notify-failure", request, {
       jobId,
       attempts: 3,
       backoff: { type: "exponential", delay: 1_000 },
-      removeOnComplete: { age: 30 * 24 * 60 * 60, count: 10_000 },
-      removeOnFail: { age: 30 * 24 * 60 * 60, count: 10_000 },
+      removeOnComplete: { age: 30 * 24 * 60 * 60, count: 1_000 },
+      removeOnFail: { age: 30 * 24 * 60 * 60, count: 1_000 },
       sizeLimit: 32 * 1024,
       stackTraceLimit: 5,
     });
@@ -104,11 +175,46 @@ export class BullMqPublicationQueue implements PublicationQueue {
 }
 
 export function validatePublicationJob(value: unknown): PublicationJob {
-  if (isFailurePublicationRequest(value)) return validateFailurePublicationRequest(value);
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(",") === "commentId,reviewRequest"
+  ) {
+    const payload = value as Record<string, unknown>;
+    if (
+      typeof payload.commentId !== "number" ||
+      !Number.isSafeInteger(payload.commentId) ||
+      payload.commentId < 1
+    )
+      throw new TypeError("invalid comment command");
+    return {
+      reviewRequest: validateQueuedReviewRequest(payload.reviewRequest),
+      commentId: payload.commentId,
+    };
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(",") === "reviewRequest,stage"
+  ) {
+    const payload = value as Record<string, unknown>;
+    if (payload.stage !== "queued" && payload.stage !== "running")
+      throw new TypeError("invalid publication stage");
+    return {
+      reviewRequest: validateQueuedReviewRequest(payload.reviewRequest),
+      stage: payload.stage,
+    };
+  }
+  if (isFailurePublicationRequest(value))
+    return validateFailurePublicationRequest(value);
   return validatePublicationRequest(value);
 }
 
-export function validateFailurePublicationRequest(value: unknown): FailurePublicationRequest {
+export function validateFailurePublicationRequest(
+  value: unknown,
+): FailurePublicationRequest {
   if (!isFailurePublicationRequest(value)) {
     throw new TypeError("failure publication queue payload is invalid");
   }
@@ -116,15 +222,22 @@ export function validateFailurePublicationRequest(value: unknown): FailurePublic
   const failureCode = payload.failureCode;
   if (
     typeof failureCode !== "string" ||
-    !new Set(["base-ref-changed", "head-ref-changed", "timeout", "analysis-failed"]).has(
-      failureCode,
-    )
+    !new Set([
+      "base-ref-changed",
+      "head-ref-changed",
+      "timeout",
+      "analysis-failed",
+      "inspection-blocked",
+    ]).has(failureCode)
   ) {
     throw new TypeError("failure publication code is invalid");
   }
   return Object.freeze({
     reviewRequest: validateQueuedReviewRequest(payload.reviewRequest),
     failureCode: failureCode as AnalysisFailureCode,
+    ...(payload.attemptId === undefined
+      ? {}
+      : { attemptId: requireAttemptId(payload.attemptId) }),
   });
 }
 
@@ -133,7 +246,10 @@ function isFailurePublicationRequest(value: unknown): boolean {
     typeof value === "object" &&
     value !== null &&
     !Array.isArray(value) &&
-    Object.keys(value).sort().join(",") === "failureCode,reviewRequest"
+    [
+      "failureCode,reviewRequest",
+      "attemptId,failureCode,reviewRequest",
+    ].includes(Object.keys(value).sort().join(","))
   );
 }
 
@@ -142,13 +258,33 @@ export function validatePublicationRequest(value: unknown): PublicationRequest {
     throw new TypeError("publication queue payload must be an object");
   }
   const payload = value as Record<string, unknown>;
-  if (Object.keys(payload).sort().join(",") !== "exactDiff,output,reviewRequest") {
+  if (
+    ![
+      "exactDiff,output,reviewRequest",
+      "exactDiff,output,rejectedFindingCount,reviewRequest",
+    ].includes(Object.keys(payload).sort().join(","))
+  ) {
     throw new TypeError("publication queue payload has unexpected properties");
   }
   const reviewRequest = validateQueuedReviewRequest(payload.reviewRequest);
   const exactDiff = validateExactDiff(payload.exactDiff, reviewRequest.headSha);
   const output = validateCompletedReviewOutput(payload.output);
-  return Object.freeze({ reviewRequest, exactDiff, output });
+  if (
+    payload.rejectedFindingCount !== undefined &&
+    (typeof payload.rejectedFindingCount !== "number" ||
+      !Number.isSafeInteger(payload.rejectedFindingCount) ||
+      payload.rejectedFindingCount < 0 ||
+      payload.rejectedFindingCount > 1000)
+  )
+    throw new TypeError("rejected finding count is invalid");
+  return Object.freeze({
+    reviewRequest,
+    exactDiff,
+    output,
+    ...(payload.rejectedFindingCount === undefined
+      ? {}
+      : { rejectedFindingCount: payload.rejectedFindingCount as number }),
+  });
 }
 
 function validateExactDiff(value: unknown, expectedHeadSha: string): ExactDiff {
@@ -156,46 +292,82 @@ function validateExactDiff(value: unknown, expectedHeadSha: string): ExactDiff {
     throw new TypeError("publication exactDiff must be an object");
   }
   const diff = value as Record<string, unknown>;
-  if (Object.keys(diff).sort().join(",") !== "baseSha,files,headSha") {
+  if (
+    !["baseSha,files,headSha", "baseSha,files,headSha,mergeBaseSha"].includes(
+      Object.keys(diff).sort().join(","),
+    )
+  ) {
     throw new TypeError("publication exactDiff has unexpected properties");
   }
   const baseSha = requireSha(diff.baseSha, "baseSha");
   const headSha = requireSha(diff.headSha, "headSha");
-  if (headSha !== expectedHeadSha) throw new TypeError("publication head SHA does not match request");
+  if (headSha !== expectedHeadSha)
+    throw new TypeError("publication head SHA does not match request");
   if (!Array.isArray(diff.files) || diff.files.length > 500) {
     throw new TypeError("publication exactDiff files are invalid");
   }
-  const files = diff.files.map((value, index) => validateChangedFile(value, index));
-  return { baseSha, headSha, files };
+  const files = diff.files.map((value, index) =>
+    validateChangedFile(value, index),
+  );
+  return {
+    baseSha,
+    headSha,
+    files,
+    ...(diff.mergeBaseSha === undefined
+      ? {}
+      : { mergeBaseSha: requireSha(diff.mergeBaseSha, "mergeBaseSha") }),
+  };
 }
 
-function validateChangedFile(value: unknown, index: number): ExactDiff["files"][number] {
+function validateChangedFile(
+  value: unknown,
+  index: number,
+): ExactDiff["files"][number] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError(`publication diff file ${index} is invalid`);
   }
   const file = value as Record<string, unknown>;
-  const allowedKeys = new Set(["status", "path", "previousPath", "isDeleted", "rightSideRanges"]);
+  const allowedKeys = new Set([
+    "status",
+    "path",
+    "previousPath",
+    "isDeleted",
+    "rightSideRanges",
+  ]);
   if (Object.keys(file).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError(`publication diff file ${index} has unexpected properties`);
+    throw new TypeError(
+      `publication diff file ${index} has unexpected properties`,
+    );
   }
   if (typeof file.path !== "string" || !isSafeRepositoryPath(file.path)) {
     throw new TypeError(`publication diff file ${index} path is invalid`);
   }
   if (
     file.previousPath !== undefined &&
-    (typeof file.previousPath !== "string" || !isSafeRepositoryPath(file.previousPath))
+    (typeof file.previousPath !== "string" ||
+      !isSafeRepositoryPath(file.previousPath))
   ) {
-    throw new TypeError(`publication diff file ${index} previousPath is invalid`);
+    throw new TypeError(
+      `publication diff file ${index} previousPath is invalid`,
+    );
   }
-  if (typeof file.status !== "string" || !new Set("AMDRCTUXB").has(file.status)) {
+  if (
+    typeof file.status !== "string" ||
+    !new Set("AMDRCTUXB").has(file.status)
+  ) {
     throw new TypeError(`publication diff file ${index} status is invalid`);
   }
-  if (typeof file.isDeleted !== "boolean" || !Array.isArray(file.rightSideRanges)) {
+  if (
+    typeof file.isDeleted !== "boolean" ||
+    !Array.isArray(file.rightSideRanges)
+  ) {
     throw new TypeError(`publication diff file ${index} metadata is invalid`);
   }
   const rightSideRanges = file.rightSideRanges.map((range, rangeIndex) => {
     if (typeof range !== "object" || range === null || Array.isArray(range)) {
-      throw new TypeError(`publication diff range ${index}/${rangeIndex} is invalid`);
+      throw new TypeError(
+        `publication diff range ${index}/${rangeIndex} is invalid`,
+      );
     }
     const candidate = range as Record<string, unknown>;
     if (
@@ -207,14 +379,18 @@ function validateChangedFile(value: unknown, index: number): ExactDiff["files"][
       candidate.start < 1 ||
       candidate.end < candidate.start
     ) {
-      throw new TypeError(`publication diff range ${index}/${rangeIndex} is invalid`);
+      throw new TypeError(
+        `publication diff range ${index}/${rangeIndex} is invalid`,
+      );
     }
     return { start: candidate.start, end: candidate.end };
   });
   return {
     status: file.status as ExactDiff["files"][number]["status"],
     path: file.path,
-    ...(typeof file.previousPath === "string" ? { previousPath: file.previousPath } : {}),
+    ...(typeof file.previousPath === "string"
+      ? { previousPath: file.previousPath }
+      : {}),
     isDeleted: file.isDeleted,
     rightSideRanges,
   };
@@ -229,8 +405,17 @@ function isSafeRepositoryPath(candidate: string): boolean {
 }
 
 function requireSha(value: unknown, name: string): string {
-  if (typeof value !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)
+  ) {
     throw new TypeError(`publication ${name} is invalid`);
   }
   return value.toLowerCase();
+}
+
+function requireAttemptId(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(value))
+    throw new TypeError("failure attempt is invalid");
+  return value;
 }

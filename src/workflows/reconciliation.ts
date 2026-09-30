@@ -6,6 +6,7 @@ import type {
 } from "../github/app-auth.js";
 import {
   GitHubRestClient,
+  GitHubApiError,
   type GitHubPullRequestListClient,
 } from "../github/client.js";
 import type { ReviewQueue } from "../queue/review-queue.js";
@@ -15,8 +16,11 @@ export interface ReconciliationDependencies {
   readonly installationProvider: RepositoryInstallationProvider;
   readonly tokenProvider: InstallationTokenProvider;
   readonly reviewQueue: ReviewQueue;
-  readonly createPullRequestClient?: (token: string) => GitHubPullRequestListClient;
+  readonly createPullRequestClient?: (
+    token: string,
+  ) => GitHubPullRequestListClient;
   readonly now?: () => Date;
+  readonly onBackoff?: (delayMs: number) => void;
 }
 
 export interface ReconciliationResult {
@@ -31,21 +35,29 @@ export class ReconciliationProcessor {
 
   constructor(dependencies: ReconciliationDependencies) {
     if (dependencies.allowedRepositories.size === 0) {
-      throw new TypeError("reconciliation requires at least one allowlisted repository");
+      throw new TypeError(
+        "reconciliation requires at least one allowlisted repository",
+      );
     }
     this.#dependencies = dependencies;
   }
 
   async run(): Promise<ReconciliationResult> {
-    const runTimestamp = (this.#dependencies.now ?? (() => new Date()))().toISOString();
+    const runTimestamp = (
+      this.#dependencies.now ?? (() => new Date())
+    )().toISOString();
     let pullRequestsSeen = 0;
     let eligiblePullRequests = 0;
     const repositoriesFailed: string[] = [];
 
-    for (const repository of [...this.#dependencies.allowedRepositories].sort()) {
+    for (const repository of [
+      ...this.#dependencies.allowedRepositories,
+    ].sort()) {
       try {
         const installationId =
-          await this.#dependencies.installationProvider.getRepositoryInstallationId(repository);
+          await this.#dependencies.installationProvider.getRepositoryInstallationId(
+            repository,
+          );
         const token = await this.#dependencies.tokenProvider.getToken(
           installationId,
           repository,
@@ -57,7 +69,8 @@ export class ReconciliationProcessor {
         const pullRequests = await client.listOpenPullRequests(repository);
         pullRequestsSeen += pullRequests.length;
         for (const pullRequest of pullRequests) {
-          if (pullRequest.draft || pullRequest.headRepository !== repository) continue;
+          if (pullRequest.draft || pullRequest.headRepository !== repository)
+            continue;
           eligiblePullRequests += 1;
           await this.#dependencies.reviewQueue.enqueue({
             deliveryId: reconciliationDeliveryId(
@@ -71,10 +84,25 @@ export class ReconciliationProcessor {
             pullRequestNumber: pullRequest.pullRequestNumber,
             action: "synchronize",
             headSha: pullRequest.headSha,
+            ...(pullRequest.baseSha === undefined
+              ? {}
+              : { baseSha: pullRequest.baseSha }),
+            ...(pullRequest.baseBranch === undefined
+              ? {}
+              : { baseBranch: pullRequest.baseBranch }),
           });
         }
-      } catch {
+      } catch (error) {
         repositoriesFailed.push(repository);
+        if (
+          error instanceof GitHubApiError &&
+          (error.retryAfterMs !== undefined ||
+            error.statusCode === 401 ||
+            error.statusCode === 403)
+        ) {
+          this.#dependencies.onBackoff?.(error.retryAfterMs ?? 300_000);
+          break;
+        }
       }
     }
 
@@ -94,6 +122,8 @@ function reconciliationDeliveryId(
   runTimestamp: string,
 ): string {
   return `reconcile-${createHash("sha256")
-    .update(`${repository}#${pullRequestNumber}#${headSha.toLowerCase()}#${runTimestamp}`)
+    .update(
+      `${repository}#${pullRequestNumber}#${headSha.toLowerCase()}#${runTimestamp}`,
+    )
     .digest("hex")}`;
 }

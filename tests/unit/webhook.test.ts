@@ -3,13 +3,18 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../src/app.js";
-import { InMemoryDeliveryClaims, type ReviewRequest } from "../../src/queue/review-queue.js";
+import {
+  InMemoryDeliveryClaims,
+  type ReviewRequest,
+} from "../../src/queue/review-queue.js";
 
 const secret = "test-webhook-secret";
 const repository = "owner/project";
 const headSha = "b".repeat(40);
 
-function payload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function payload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     action: "opened",
     installation: { id: 123 },
@@ -29,7 +34,11 @@ function signature(body: string): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 }
 
-function makeApp(enqueue = vi.fn<(request: ReviewRequest) => Promise<void>>().mockResolvedValue()) {
+function makeApp(
+  enqueue = vi
+    .fn<(request: ReviewRequest) => Promise<void>>()
+    .mockResolvedValue(),
+) {
   return {
     app: buildApp({
       webhook: {
@@ -143,8 +152,31 @@ describe("GitHub webhook ingestion", () => {
   });
 
   it.each([
-    ["a repository outside the allowlist", payload({ repository: { full_name: "other/project" }, pull_request: { state: "open", draft: false, base: { repo: { full_name: "other/project" } }, head: { sha: headSha, repo: { full_name: "other/project" } } } }), 403],
-    ["a fork", payload({ pull_request: { state: "open", draft: false, base: { repo: { full_name: repository } }, head: { sha: headSha, repo: { full_name: "fork/project" } } } }), 422],
+    [
+      "a repository outside the allowlist",
+      payload({
+        repository: { full_name: "other/project" },
+        pull_request: {
+          state: "open",
+          draft: false,
+          base: { repo: { full_name: "other/project" } },
+          head: { sha: headSha, repo: { full_name: "other/project" } },
+        },
+      }),
+      403,
+    ],
+    [
+      "a fork",
+      payload({
+        pull_request: {
+          state: "open",
+          draft: false,
+          base: { repo: { full_name: repository } },
+          head: { sha: headSha, repo: { full_name: "fork/project" } },
+        },
+      }),
+      422,
+    ],
     ["an unsupported action", payload({ action: "closed" }), 422],
   ])("rejects %s", async (_name, value, statusCode) => {
     const { app, enqueue } = makeApp();
@@ -154,3 +186,45 @@ describe("GitHub webhook ingestion", () => {
     await app.close();
   });
 });
+
+it.each([
+  ["User", "/codex-review", true],
+  ["Bot", "/codex-review", false],
+  ["User", "please /codex-review", false],
+])(
+  "routes only exact human commands (%s, %s)",
+  async (type, body, enqueued) => {
+    const enqueueCommand = vi.fn().mockResolvedValue(undefined);
+    const enqueue = vi.fn();
+    const app = buildApp({
+      webhook: {
+        secret,
+        allowedRepositories: new Set([repository]),
+        queue: { enqueue },
+        deliveryClaims: new InMemoryDeliveryClaims(),
+        commandQueue: { enqueueCommand },
+      },
+    });
+    const data = JSON.stringify({
+      action: "created",
+      repository: { full_name: repository },
+      installation: { id: 123 },
+      issue: { number: 7, pull_request: {} },
+      comment: { id: 9, body, user: { type } },
+    });
+    const response = await inject(app, data, {
+      "x-github-event": "issue_comment",
+    });
+    expect(response.statusCode).toBe(enqueued ? 202 : 200);
+    expect(enqueueCommand).toHaveBeenCalledTimes(enqueued ? 1 : 0);
+    expect(enqueue).not.toHaveBeenCalled();
+    if (enqueued) {
+      await inject(app, data, { "x-github-event": "issue_comment" });
+      expect(enqueueCommand).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(enqueueCommand.mock.calls[0])).not.toContain(
+        "/codex-review",
+      );
+    }
+    await app.close();
+  },
+);

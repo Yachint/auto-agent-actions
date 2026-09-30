@@ -19,6 +19,7 @@ const validEnvironment = {
 describe("webhook server runtime configuration", () => {
   it("loads strict defaults and an explicit repository allowlist", async () => {
     await expect(loadWebhookServerConfig(validEnvironment)).resolves.toEqual({
+      enableCommentCommands: false,
       host: "127.0.0.1",
       port: 3000,
       logLevel: "info",
@@ -34,7 +35,13 @@ describe("webhook server runtime configuration", () => {
   it.each([
     [{ ...validEnvironment, REDIS_URL: "http://redis.example" }, /REDIS_URL/],
     [{ ...validEnvironment, GITHUB_WEBHOOK_SECRET: "short" }, /at least 32/],
-    [{ ...validEnvironment, GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/project" }, /duplicates/],
+    [
+      {
+        ...validEnvironment,
+        GITHUB_ALLOWED_REPOSITORIES: "owner/project,owner/project",
+      },
+      /duplicates/,
+    ],
     [{ ...validEnvironment, REVIEW_QUEUE_NAME: "unsafe:name" }, /safe queue/],
     [{ ...validEnvironment, PORT: "70000" }, /between 1 and 65535/],
   ])("fails closed for invalid configuration", async (environment, message) => {
@@ -60,7 +67,7 @@ describe("webhook server runtime configuration", () => {
     });
     expect(config).toEqual(
       expect.objectContaining({
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         reasoningEffort: "high",
         brokerSocketPath: "/run/auto-agent-actions/broker.sock",
         abandonedWorktreeAgeMs: 86_400_000,
@@ -113,7 +120,9 @@ describe("webhook server runtime configuration", () => {
           GITHUB_APP_PRIVATE_KEY_FILE: keyPath,
           REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS: "false",
         }),
-      ).resolves.toEqual(expect.objectContaining({ publishSummaryWithoutFindings: false }));
+      ).resolves.toEqual(
+        expect.objectContaining({ publishSummaryWithoutFindings: false }),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

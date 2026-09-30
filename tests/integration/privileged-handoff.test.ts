@@ -6,7 +6,10 @@ import type {
   GitHubReviewClient,
 } from "../../src/github/client.js";
 import type { PublicationRequest } from "../../src/queue/publication-queue.js";
-import type { ReviewQueue, ReviewRequest } from "../../src/queue/review-queue.js";
+import type {
+  ReviewQueue,
+  ReviewRequest,
+} from "../../src/queue/review-queue.js";
 import { InMemoryReviewStateStore } from "../../src/queue/review-state.js";
 import { AnalysisJobProcessor } from "../../src/workflows/analysis-job.js";
 import { PublicationJobProcessor } from "../../src/workflows/publication-job.js";
@@ -53,10 +56,12 @@ const output = {
 
 function tokenProvider(): InstallationTokenProvider {
   return {
-    getToken: vi.fn().mockImplementation(async (_installation, _repository, purpose) => ({
-      token: purpose === "repository-read" ? "read-token" : "write-token",
-      expiresAt: new Date("2026-07-16T13:00:00Z"),
-    })),
+    getToken: vi
+      .fn()
+      .mockImplementation(async (_installation, _repository, purpose) => ({
+        token: purpose === "repository-read" ? "read-token" : "write-token",
+        expiresAt: new Date("2026-07-16T13:00:00Z"),
+      })),
   };
 }
 
@@ -64,7 +69,9 @@ function reviewQueue(): ReviewQueue & { enqueue: ReturnType<typeof vi.fn> } {
   return { enqueue: vi.fn().mockResolvedValue(undefined) };
 }
 
-function pullRequest(head = headSha): Awaited<ReturnType<GitHubRepositoryClient["getPullRequestDetails"]>> {
+function pullRequest(
+  head = headSha,
+): Awaited<ReturnType<GitHubRepositoryClient["getPullRequestDetails"]>> {
   return {
     state: "open",
     draft: false,
@@ -116,7 +123,11 @@ describe("privilege-separated analysis to publication handoff", () => {
     );
 
     await expect(processor.process(reviewRequest)).resolves.toBe("handed-off");
-    expect(tokens.getToken).toHaveBeenCalledWith(77, "owner/project", "repository-read");
+    expect(tokens.getToken).toHaveBeenCalledWith(
+      77,
+      "owner/project",
+      "repository-read",
+    );
     expect(runReview).toHaveBeenCalledWith(
       expect.objectContaining({
         remoteUrl: "https://github.com/owner/project.git",
@@ -126,12 +137,19 @@ describe("privilege-separated analysis to publication handoff", () => {
       }),
     );
     expect(publications.enqueue).toHaveBeenCalledWith({
-      reviewRequest: expect.objectContaining(reviewRequest),
+      reviewRequest: expect.objectContaining({
+        ...reviewRequest,
+        deliveryId: expect.stringMatching(/^artifact-/),
+      }),
       exactDiff,
       output,
     });
     expect(await state.get("owner/project", 7)).toEqual(
-      expect.objectContaining({ status: "running", currentlyRunningHeadSha: headSha }),
+      expect.objectContaining({
+        status: "publishing",
+        currentlyRunningHeadSha: null,
+        publicationArtifact: expect.any(String),
+      }),
     );
   });
 
@@ -156,7 +174,9 @@ describe("privilege-separated analysis to publication handoff", () => {
         reviewQueue: reviews,
         publicationQueue: { enqueue: vi.fn(), enqueueFailure: vi.fn() },
         createRepositoryClient: () => ({
-          getPullRequestDetails: vi.fn().mockResolvedValue(pullRequest(newHeadSha)),
+          getPullRequestDetails: vi
+            .fn()
+            .mockResolvedValue(pullRequest(newHeadSha)),
         }),
         runReview,
       },
@@ -190,10 +210,24 @@ describe("privilege-separated analysis to publication handoff", () => {
       reviewQueue: reviewQueue(),
       createReviewClient: () => client,
     });
-    const publication: PublicationRequest = { reviewRequest, exactDiff, output };
+    const publication: PublicationRequest = {
+      reviewRequest,
+      exactDiff,
+      output,
+    };
+    await state.handoff(
+      "owner/project",
+      7,
+      headSha,
+      JSON.stringify(publication),
+    );
 
     await expect(processor.process(publication)).resolves.toBe("published");
-    expect(tokens.getToken).toHaveBeenCalledWith(77, "owner/project", "review-write");
+    expect(tokens.getToken).toHaveBeenCalledWith(
+      77,
+      "owner/project",
+      "review-write",
+    );
     expect(client.createReview).toHaveBeenCalledWith(
       expect.objectContaining({ event: "REQUEST_CHANGES", commitId: headSha }),
     );
@@ -228,6 +262,12 @@ describe("privilege-separated analysis to publication handoff", () => {
       createReviewClient: () => client,
     });
 
+    await state.handoff(
+      "owner/project",
+      7,
+      headSha,
+      JSON.stringify({ reviewRequest, exactDiff, output }),
+    );
     await expect(
       processor.process({ reviewRequest, exactDiff, output }),
     ).resolves.toBe("superseded");
@@ -263,7 +303,11 @@ describe("privilege-separated analysis to publication handoff", () => {
     await expect(
       processor.process({ reviewRequest, failureCode: "timeout" }),
     ).resolves.toBe("failure-notified");
-    expect(tokens.getToken).toHaveBeenCalledWith(77, "owner/project", "review-write");
+    expect(tokens.getToken).toHaveBeenCalledWith(
+      77,
+      "owner/project",
+      "review-write",
+    );
     expect(client.createReview).toHaveBeenCalledWith(
       expect.objectContaining({
         commitId: headSha,

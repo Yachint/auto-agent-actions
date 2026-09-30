@@ -1,9 +1,17 @@
 import { createPrivateKey, sign } from "node:crypto";
 
-import { GitHubApiError } from "./client.js";
+import { GitHubApiError, githubResponseError } from "./client.js";
 
 const API_VERSION = "2026-03-10";
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1_000;
+
+export interface GitHubAppIdentity {
+  readonly appId: number;
+  readonly botLogin: string;
+}
+export interface GitHubAppIdentityProvider {
+  getAppIdentity(): Promise<GitHubAppIdentity>;
+}
 
 export interface InstallationToken {
   readonly token: string;
@@ -31,9 +39,17 @@ export interface GitHubAppAuthOptions {
   readonly apiBaseUrl?: string;
   readonly timeoutMs?: number;
   readonly now?: () => Date;
+  readonly enableChecks?: boolean;
 }
 
-export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInstallationProvider {
+export class GitHubAppAuth
+  implements
+    InstallationTokenProvider,
+    RepositoryInstallationProvider,
+    GitHubAppIdentityProvider
+{
+  #identity: { value: GitHubAppIdentity; expiresAt: number } | undefined;
+  readonly #enableChecks: boolean;
   readonly #appId: string;
   readonly #privateKey: ReturnType<typeof createPrivateKey>;
   readonly #fetch: typeof globalThis.fetch;
@@ -41,6 +57,10 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
   readonly #timeoutMs: number;
   readonly #now: () => Date;
   readonly #cache = new Map<string, InstallationToken>();
+  readonly #installations = new Map<
+    string,
+    { id: number; expiresAt: number }
+  >();
 
   constructor(options: GitHubAppAuthOptions) {
     if (!/^\d+$/.test(options.appId) || options.appId === "0") {
@@ -56,18 +76,69 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
     }
     const apiBaseUrl = options.apiBaseUrl ?? "https://api.github.com";
     const parsedBaseUrl = new URL(apiBaseUrl);
-    if (parsedBaseUrl.protocol !== "https:" && parsedBaseUrl.hostname !== "127.0.0.1") {
+    if (
+      parsedBaseUrl.protocol !== "https:" &&
+      parsedBaseUrl.hostname !== "127.0.0.1"
+    ) {
       throw new TypeError("apiBaseUrl must use HTTPS");
     }
     const timeoutMs = options.timeoutMs ?? 30_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
       throw new TypeError("timeoutMs must be a positive integer");
     }
+    this.#enableChecks = options.enableChecks ?? false;
     this.#appId = options.appId;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#apiBaseUrl = apiBaseUrl.replace(/\/$/, "");
     this.#timeoutMs = timeoutMs;
     this.#now = options.now ?? (() => new Date());
+  }
+
+  async getAppIdentity(): Promise<GitHubAppIdentity> {
+    if (this.#identity && this.#identity.expiresAt > this.#now().getTime())
+      return this.#identity.value;
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#apiBaseUrl}/app`, {
+        method: "GET",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${createAppJwt(this.#appId, this.#privateKey, this.#now())}`,
+          "User-Agent": "auto-agent-actions",
+          "X-GitHub-Api-Version": API_VERSION,
+        },
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch {
+      throw new GitHubApiError("GitHub App identity request failed");
+    }
+    if (!response.ok)
+      throw githubResponseError(response, "GitHub App identity endpoint");
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new GitHubApiError("GitHub App identity returned invalid JSON");
+    }
+    const app = requireRecord(value);
+    if (
+      app.id !== Number(this.#appId) ||
+      !Number.isSafeInteger(app.id) ||
+      typeof app.slug !== "string" ||
+      !/^[a-zA-Z0-9-]{1,100}$/.test(app.slug)
+    )
+      throw new GitHubApiError(
+        "GitHub App identity does not match configuration",
+      );
+    const identity = Object.freeze({
+      appId: app.id as number,
+      botLogin: `${app.slug}[bot]`,
+    });
+    this.#identity = {
+      value: identity,
+      expiresAt: this.#now().getTime() + 300_000,
+    };
+    return identity;
   }
 
   async getToken(
@@ -81,10 +152,19 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
     const repositoryName = parseRepositoryName(repository);
     const cacheKey = `${installationId}:${repository.toLowerCase()}:${purpose}`;
     const cached = this.#cache.get(cacheKey);
-    if (cached !== undefined && cached.expiresAt.getTime() - this.#now().getTime() > TOKEN_REFRESH_MARGIN_MS) {
+    if (
+      cached !== undefined &&
+      cached.expiresAt.getTime() - this.#now().getTime() >
+        TOKEN_REFRESH_MARGIN_MS
+    ) {
       return cached;
     }
 
+    if ((await this.getRepositoryInstallationId(repository)) !== installationId)
+      throw new GitHubApiError(
+        "repository installation does not match request",
+        403,
+      );
     const jwt = createAppJwt(this.#appId, this.#privateKey, this.#now());
     let response: Response;
     try {
@@ -104,7 +184,10 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
             permissions:
               purpose === "repository-read"
                 ? { contents: "read", pull_requests: "read" }
-                : { pull_requests: "write" },
+                : {
+                    pull_requests: "write",
+                    ...(this.#enableChecks ? { checks: "write" } : {}),
+                  },
           }),
           signal: AbortSignal.timeout(this.#timeoutMs),
         },
@@ -113,10 +196,7 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
       throw new GitHubApiError("GitHub installation token request failed");
     }
     if (!response.ok) {
-      throw new GitHubApiError(
-        `GitHub installation token endpoint returned HTTP ${response.status}`,
-        response.status,
-      );
+      throw githubResponseError(response, "GitHub installation token endpoint");
     }
 
     let value: unknown;
@@ -132,8 +212,13 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
     const token = requireString(payload.token, "token");
     const expiresAtValue = requireString(payload.expires_at, "expires_at");
     const expiresAt = new Date(expiresAtValue);
-    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= this.#now().getTime()) {
-      throw new GitHubApiError("GitHub returned an invalid installation token expiry");
+    if (
+      !Number.isFinite(expiresAt.getTime()) ||
+      expiresAt.getTime() <= this.#now().getTime()
+    ) {
+      throw new GitHubApiError(
+        "GitHub returned an invalid installation token expiry",
+      );
     }
     const result = Object.freeze({ token, expiresAt });
     this.#cache.set(cacheKey, result);
@@ -142,6 +227,9 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
 
   async getRepositoryInstallationId(repository: string): Promise<number> {
     const [owner, name] = parseRepository(repository);
+    const cached = this.#installations.get(repository.toLowerCase());
+    if (cached !== undefined && cached.expiresAt > this.#now().getTime())
+      return cached.id;
     const jwt = createAppJwt(this.#appId, this.#privateKey, this.#now());
     let response: Response;
     try {
@@ -162,21 +250,29 @@ export class GitHubAppAuth implements InstallationTokenProvider, RepositoryInsta
       throw new GitHubApiError("GitHub repository installation request failed");
     }
     if (!response.ok) {
-      throw new GitHubApiError(
-        `GitHub repository installation endpoint returned HTTP ${response.status}`,
-        response.status,
+      throw githubResponseError(
+        response,
+        "GitHub repository installation endpoint",
       );
     }
     let value: unknown;
     try {
       value = await response.json();
     } catch {
-      throw new GitHubApiError("GitHub repository installation endpoint returned invalid JSON");
+      throw new GitHubApiError(
+        "GitHub repository installation endpoint returned invalid JSON",
+      );
     }
     const id = requireRecord(value).id;
     if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
-      throw new GitHubApiError("GitHub returned an invalid repository installation id");
+      throw new GitHubApiError(
+        "GitHub returned an invalid repository installation id",
+      );
     }
+    this.#installations.set(repository.toLowerCase(), {
+      id,
+      expiresAt: this.#now().getTime() + 300_000,
+    });
     return id;
   }
 }
@@ -192,7 +288,11 @@ export function createAppJwt(
     JSON.stringify({ iat: issuedAt, exp: issuedAt + 9 * 60, iss: appId }),
   );
   const unsigned = `${header}.${payload}`;
-  const signature = sign("RSA-SHA256", Buffer.from(unsigned), privateKey).toString("base64url");
+  const signature = sign(
+    "RSA-SHA256",
+    Buffer.from(unsigned),
+    privateKey,
+  ).toString("base64url");
   return `${unsigned}.${signature}`;
 }
 
@@ -214,7 +314,9 @@ function parseRepository(repository: string): [string, string] {
 
 function requireRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new GitHubApiError("GitHub returned an invalid installation token response");
+    throw new GitHubApiError(
+      "GitHub returned an invalid installation token response",
+    );
   }
   return value as Record<string, unknown>;
 }

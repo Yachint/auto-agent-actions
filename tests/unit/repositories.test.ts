@@ -36,9 +36,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -148,7 +148,12 @@ describe("repository manager and exact diff inspection", () => {
           findings: [
             validFinding,
             { ...validFinding, start_line: 3, end_line: 3 },
-            { ...validFinding, path: "deleted.txt", start_line: 1, end_line: 1 },
+            {
+              ...validFinding,
+              path: "deleted.txt",
+              start_line: 1,
+              end_line: 1,
+            },
           ],
           summary: "Review summary",
         },
@@ -160,6 +165,92 @@ describe("repository manager and exact diff inspection", () => {
     } finally {
       await dispose();
     }
+  });
+
+  it("compares against the merge base when the target branch has diverged", async () => {
+    const local = await createRepositoryFixture();
+    await git(local.sourcePath, ["switch", "main"]);
+    await writeFile(
+      path.join(local.sourcePath, "base-only.txt"),
+      "target-only change\n",
+    );
+    await git(local.sourcePath, ["add", "."]);
+    await git(local.sourcePath, ["commit", "-m", "advance target"]);
+    const baseTip = (await git(local.sourcePath, ["rev-parse", "HEAD"])).trim();
+    const diff = await new DiffInspector().inspect({
+      worktreePath: local.sourcePath,
+      baseSha: baseTip,
+      headSha: local.headSha,
+    });
+    expect(diff.baseSha).toBe(baseTip);
+    expect(diff.mergeBaseSha).toBe(local.baseSha);
+    expect(diff.files.some((file) => file.path === "base-only.txt")).toBe(
+      false,
+    );
+  });
+
+  it("treats wildcard filenames as literal paths when computing anchors", async () => {
+    const local = await createRepositoryFixture();
+    const base = local.headSha;
+    await writeFile(path.join(local.sourcePath, "*.txt"), "literal\n");
+    await writeFile(
+      path.join(local.sourcePath, "ordinary.txt"),
+      "one\ntwo\nthree\n",
+    );
+    await git(local.sourcePath, ["add", "."]);
+    await git(local.sourcePath, ["commit", "-m", "wildcard paths"]);
+    const head = (await git(local.sourcePath, ["rev-parse", "HEAD"])).trim();
+    const diff = await new DiffInspector().inspect({
+      worktreePath: local.sourcePath,
+      baseSha: base,
+      headSha: head,
+    });
+    expect(
+      diff.files.find((file) => file.path === "*.txt")?.rightSideRanges,
+    ).toEqual([{ start: 1, end: 1 }]);
+  });
+
+  it("replays immutable bundle refs after the live PR ref advances", async () => {
+    const local = await createRepositoryFixture();
+    const bundle = path.join(local.dataPath, "snapshot.bundle");
+    await git(local.sourcePath, [
+      "update-ref",
+      "refs/auto-agent-actions/snapshot/base",
+      local.baseSha,
+    ]);
+    await git(local.sourcePath, [
+      "update-ref",
+      "refs/auto-agent-actions/snapshot/head",
+      local.headSha,
+    ]);
+    await git(local.sourcePath, [
+      "bundle",
+      "create",
+      bundle,
+      "refs/auto-agent-actions/snapshot/base",
+      "refs/auto-agent-actions/snapshot/head",
+    ]);
+    await git(local.sourcePath, [
+      "update-ref",
+      "refs/pull/7/head",
+      local.baseSha,
+    ]);
+    const manager = new RepositoryManager({ dataDirectory: local.dataPath });
+    const imported = await manager.importSnapshot({
+      repository: "example/project",
+      snapshotPath: bundle,
+      expectedBaseSha: local.baseSha,
+      expectedHeadSha: local.headSha,
+    });
+    expect(imported.headSha).toBe(local.headSha);
+    await expect(
+      manager.importSnapshot({
+        repository: "example/project",
+        snapshotPath: bundle,
+        expectedBaseSha: local.baseSha,
+        expectedHeadSha: local.baseSha,
+      }),
+    ).rejects.toThrow("snapshot SHA mismatch");
   });
 
   it("rejects stale fetched refs", async () => {
@@ -179,7 +270,10 @@ describe("repository manager and exact diff inspection", () => {
 
   it("uses the exact captured base commit when the base branch advances during fetch", async () => {
     await git(fixture.sourcePath, ["switch", "main"]);
-    await writeFile(path.join(fixture.sourcePath, "base-advanced.txt"), "new base tip\n");
+    await writeFile(
+      path.join(fixture.sourcePath, "base-advanced.txt"),
+      "new base tip\n",
+    );
     await git(fixture.sourcePath, ["add", "base-advanced.txt"]);
     await git(fixture.sourcePath, ["commit", "-m", "advance base"]);
     const manager = new RepositoryManager({ dataDirectory: fixture.dataPath });
@@ -213,7 +307,9 @@ describe("repository manager and exact diff inspection", () => {
   });
 
   it("passes private GitHub credentials only through a temporary askpass environment", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "auto-agent-private-fetch-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "auto-agent-private-fetch-"),
+    );
     temporaryDirectories.push(root);
     const dataPath = path.join(root, "data");
     await mkdir(dataPath);
@@ -229,11 +325,16 @@ describe("repository manager and exact diff inspection", () => {
       }
       const revision = command.args.at(-1) ?? "";
       return {
-        stdout: Buffer.from(revision.includes("/base") ? fixture.baseSha : fixture.headSha),
+        stdout: Buffer.from(
+          revision.includes("/base") ? fixture.baseSha : fixture.headSha,
+        ),
         stderr: Buffer.alloc(0),
       };
     };
-    const manager = new RepositoryManager({ dataDirectory: dataPath, gitExecutor: executor });
+    const manager = new RepositoryManager({
+      dataDirectory: dataPath,
+      gitExecutor: executor,
+    });
 
     await manager.fetchReviewRefs({
       repository: "example/project",
@@ -246,14 +347,22 @@ describe("repository manager and exact diff inspection", () => {
     });
 
     expect(authenticatedCommand).toBeDefined();
-    expect(authenticatedCommand!.args.join(" ")).not.toContain("ghs_variable_length_secret");
-    expect(authenticatedCommand!.args).toContain("https://github.com/example/project.git");
+    expect(authenticatedCommand!.args.join(" ")).not.toContain(
+      "ghs_variable_length_secret",
+    );
+    expect(authenticatedCommand!.args).toContain(
+      "https://github.com/example/project.git",
+    );
     expect(authenticatedCommand!.authentication).toEqual({
-      askPassPath: expect.stringContaining(`${path.sep}runtime-auth${path.sep}git-`),
+      askPassPath: expect.stringContaining(
+        `${path.sep}runtime-auth${path.sep}git-`,
+      ),
       username: "x-access-token",
       password: "ghs_variable_length_secret",
     });
-    await expect(access(authenticatedCommand!.authentication!.askPassPath)).rejects.toThrow();
+    await expect(
+      access(authenticatedCommand!.authentication!.askPassPath),
+    ).rejects.toThrow();
   });
 
   it("rejects authenticated fetches whose URL does not exactly match the repository", async () => {
@@ -272,7 +381,9 @@ describe("repository manager and exact diff inspection", () => {
   });
 
   it("removes the temporary askpass helper when Git fetch fails", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "auto-agent-failed-private-fetch-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "auto-agent-failed-private-fetch-"),
+    );
     temporaryDirectories.push(root);
     const dataPath = path.join(root, "data");
     await mkdir(dataPath);
@@ -288,7 +399,10 @@ describe("repository manager and exact diff inspection", () => {
       }
       return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
     };
-    const manager = new RepositoryManager({ dataDirectory: dataPath, gitExecutor: executor });
+    const manager = new RepositoryManager({
+      dataDirectory: dataPath,
+      gitExecutor: executor,
+    });
 
     await expect(
       manager.fetchReviewRefs({
@@ -383,7 +497,10 @@ async function createRepositoryFixture(): Promise<{
   await git(sourcePath, ["config", "user.email", "test@example.com"]);
 
   await mkdir(path.join(sourcePath, "src"));
-  await writeFile(path.join(sourcePath, "src/app.ts"), "one\ntwo\nthree\nfour\n");
+  await writeFile(
+    path.join(sourcePath, "src/app.ts"),
+    "one\ntwo\nthree\nfour\n",
+  );
   await writeFile(path.join(sourcePath, "deleted.txt"), "delete me\n");
   await writeFile(
     path.join(sourcePath, "old-name.txt"),

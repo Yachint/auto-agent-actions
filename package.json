@@ -18,7 +18,10 @@
     "preflight:vps": "node scripts/vps-preflight.mjs",
     "verify:codex": "node scripts/verify-codex-cli.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "review:evaluate": "tsx src/cli/evaluate.ts",
+    "review:rereview": "tsx src/cli/rereview.ts",
+    "release:manifest": "node scripts/release-manifest.mjs"
   },
   "keywords": [],
   "author": "",

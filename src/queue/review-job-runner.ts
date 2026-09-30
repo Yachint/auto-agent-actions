@@ -1,4 +1,5 @@
-import type { ReviewRequest } from "./review-queue.js";
+import { randomUUID } from "node:crypto";
+import { reviewScope, type ReviewRequest } from "./review-queue.js";
 import type { ReviewStateStore } from "./review-state.js";
 
 export interface ReviewJobLease {
@@ -19,10 +20,12 @@ export class ReviewJobRunner {
     request: ReviewRequest,
     process: (lease: ReviewJobLease) => Promise<void>,
   ): Promise<ReviewJobResult> {
+    const attemptId = randomUUID();
     const started = await this.#stateStore.tryStart(
       request.repository,
       request.pullRequestNumber,
-      request.headSha,
+      reviewScope(request),
+      attemptId,
     );
     if (!started) return "superseded";
 
@@ -32,7 +35,8 @@ export class ReviewJobRunner {
         this.#stateStore.canPublish(
           request.repository,
           request.pullRequestNumber,
-          request.headSha,
+          reviewScope(request),
+          attemptId,
         ),
     });
     try {
@@ -40,14 +44,16 @@ export class ReviewJobRunner {
       const completed = await this.#stateStore.complete(
         request.repository,
         request.pullRequestNumber,
-        request.headSha,
+        reviewScope(request),
+        attemptId,
       );
       return completed ? "completed" : "superseded";
     } catch (error) {
       await this.#stateStore.fail(
         request.repository,
         request.pullRequestNumber,
-        request.headSha,
+        reviewScope(request),
+        attemptId,
       );
       throw error;
     }

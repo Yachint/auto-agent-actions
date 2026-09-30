@@ -1,0 +1,51 @@
+name: CI
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6380:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: cmp src/codex/review-coverage-schema.json dist/src/codex/review-coverage-schema.json && cmp src/codex/review-schema.json dist/src/codex/review-schema.json && cmp src/codex/review-instructions.md dist/src/codex/review-instructions.md
+      - run: npm test
+        env:
+          RUN_REDIS_TEST: "1"
+          AAA_TEST_REDIS_URL: redis://127.0.0.1:6380
+          RUN_UNIX_SOCKET_TEST: "1"
+          RUN_NATIVE_SANDBOX_TEST: "1"
+      - run: npm audit --audit-level=moderate
+      - run: docker build --target app-runtime -t aaa-app:ci .
+      - run: docker build --target analysis-runtime --build-arg CODEX_CLI_VERSION=0.155.1 -t aaa-analysis:ci .
+      - run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --user 1000:1000
+          --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m
+          --tmpfs /var/lib/codex:rw,nosuid,nodev,size=32m,uid=1000,gid=1000
+          aaa-analysis:ci node --input-type=module -e
+          'import {verifyCodexReadOnlySandbox} from "./dist/src/codex/runner.js"; await verifyCodexReadOnlySandbox();'
+      - run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --user 1000:1000
+          --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m
+          --tmpfs /var/lib/codex:rw,nosuid,nodev,size=32m,uid=1000,gid=1000
+          --tmpfs /var/lib/auto-agent-actions:rw,nosuid,nodev,size=64m,uid=1000,gid=1000
+          --mount type=bind,src=${{ github.workspace }}/scripts/isolated-codex-canary.mjs,dst=/app/scripts/isolated-codex-canary.mjs,readonly
+          aaa-analysis:ci node /app/scripts/isolated-codex-canary.mjs

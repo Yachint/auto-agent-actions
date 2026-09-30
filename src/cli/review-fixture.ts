@@ -6,8 +6,8 @@ import { runLocalReview } from "../workflows/local-review.js";
 import type { ReasoningEffort } from "../codex/runner.js";
 
 const MAX_FIXTURE_BYTES = 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-const DEFAULT_MODEL = "gpt-5.6-sol";
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_MODEL = "gpt-6.1-sol";
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = "high";
 
 interface CliOptions {
@@ -18,6 +18,7 @@ interface CliOptions {
   timeoutMs: number;
   remoteUrlOverride?: string;
   codexBinary?: string;
+  snapshotPath?: string;
 }
 
 export async function main(
@@ -45,12 +46,15 @@ export async function main(
 
   const result = await runLocalReview({
     fixture,
+    ...(options.snapshotPath === undefined
+      ? {}
+      : { snapshotPath: options.snapshotPath }),
     dataDirectory: options.dataDirectory,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     timeoutMs: options.timeoutMs,
     schemaPath: fileURLToPath(
-      new URL("../codex/review-schema.json", import.meta.url),
+      new URL("../codex/review-coverage-schema.json", import.meta.url),
     ),
     instructionsPath: fileURLToPath(
       new URL("../codex/review-instructions.md", import.meta.url),
@@ -73,6 +77,7 @@ function parseArguments(
   environment: NodeJS.ProcessEnv,
   cwd: string,
 ): CliOptions {
+  let snapshotPath: string | undefined;
   let fixturePath: string | undefined;
   let remoteUrlOverride: string | undefined;
   let dataDirectory = path.resolve(
@@ -91,6 +96,13 @@ function parseArguments(
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--snapshot") {
+      snapshotPath = path.resolve(
+        cwd,
+        requireOptionValue(args, ++index, "--snapshot"),
+      );
+      continue;
+    }
     if (argument === "--remote") {
       remoteUrlOverride = requireOptionValue(args, ++index, "--remote");
       continue;

@@ -13,6 +13,7 @@ export interface WebhookServerConfig {
   readonly publicationQueueName: string;
   readonly reviewQueueDebounceMs: number;
   readonly webhookSecret: string;
+  readonly enableCommentCommands: boolean;
   readonly allowedRepositories: ReadonlySet<string>;
 }
 
@@ -36,6 +37,9 @@ export interface AnalysisWorkerConfig extends QueueRuntimeConfig {
   readonly schemaPath: string;
   readonly instructionsPath: string;
   readonly abandonedWorktreeAgeMs: number;
+  readonly sandboxBinary?: string;
+  readonly verifyFindings: boolean;
+  readonly adaptiveEffort: boolean;
 }
 
 export interface PublisherWorkerConfig extends QueueRuntimeConfig {
@@ -48,17 +52,28 @@ export interface PublisherWorkerConfig extends QueueRuntimeConfig {
   readonly maximumInlineComments: number;
   readonly publishSummaryWithoutFindings: boolean;
   readonly reconciliationIntervalMs: number;
+  readonly enableChecks: boolean;
+  readonly enableCommentCommands: boolean;
+  readonly findingContinuity: boolean;
+  readonly blockingPriority: number;
 }
 
 export async function loadWebhookServerConfig(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<WebhookServerConfig> {
   return {
+    enableCommentCommands: strictBoolean(
+      source.REVIEW_ENABLE_COMMENT_COMMANDS ?? "false",
+      "REVIEW_ENABLE_COMMENT_COMMANDS",
+    ),
     host: source.HOST ?? "127.0.0.1",
     port: positiveInteger(source.PORT ?? "3000", "PORT", 65_535),
     logLevel: parseLogLevel(source.LOG_LEVEL ?? "info"),
     redisUrl: parseRedisUrl(required(source.REDIS_URL, "REDIS_URL")),
-    reviewQueueName: queueName(source.REVIEW_QUEUE_NAME ?? "pull-request-reviews", "REVIEW_QUEUE_NAME"),
+    reviewQueueName: queueName(
+      source.REVIEW_QUEUE_NAME ?? "pull-request-reviews",
+      "REVIEW_QUEUE_NAME",
+    ),
     publicationQueueName: queueName(
       source.PUBLICATION_QUEUE_NAME ?? "pull-request-publications",
       "PUBLICATION_QUEUE_NAME",
@@ -74,7 +89,27 @@ export async function loadWebhookServerConfig(
       "GITHUB_WEBHOOK_SECRET",
     ),
     allowedRepositories: parseAllowedRepositories(
-      required(source.GITHUB_ALLOWED_REPOSITORIES, "GITHUB_ALLOWED_REPOSITORIES"),
+      required(
+        source.GITHUB_ALLOWED_REPOSITORIES,
+        "GITHUB_ALLOWED_REPOSITORIES",
+      ),
+    ),
+  };
+}
+
+/** Shared by workers, local fixtures and evaluations so recorded policy matches execution. */
+export function loadReviewIsolationConfig(
+  source: NodeJS.ProcessEnv = process.env,
+): { sandboxBinary?: string } {
+  const enabled = strictBoolean(
+    source.REVIEW_ISOLATE_CODEX ?? "false",
+    "REVIEW_ISOLATE_CODEX",
+  );
+  if (!enabled && source.REVIEW_SANDBOX_BINARY === undefined) return {};
+  return {
+    sandboxBinary: absolutePath(
+      source.REVIEW_SANDBOX_BINARY ?? "/usr/local/bin/review-sandbox",
+      "REVIEW_SANDBOX_BINARY",
     ),
   };
 }
@@ -85,7 +120,11 @@ export async function loadAnalysisWorkerConfig(
   const common = await loadQueueRuntimeConfig(source);
   return {
     ...common,
-    concurrency: positiveInteger(source.REVIEW_WORKER_CONCURRENCY ?? "1", "REVIEW_WORKER_CONCURRENCY", 32),
+    concurrency: positiveInteger(
+      source.REVIEW_WORKER_CONCURRENCY ?? "1",
+      "REVIEW_WORKER_CONCURRENCY",
+      32,
+    ),
     brokerSocketPath: absolutePath(
       required(source.READ_TOKEN_BROKER_SOCKET, "READ_TOKEN_BROKER_SOCKET"),
       "READ_TOKEN_BROKER_SOCKET",
@@ -96,12 +135,29 @@ export async function loadAnalysisWorkerConfig(
       "READ_TOKEN_BROKER_SECRET",
     ),
     dataDirectory: path.resolve(source.REVIEW_DATA_DIR ?? ".review-data"),
-    model: modelIdentifier(source.CODEX_MODEL ?? "gpt-5.6-sol"),
+    verifyFindings: strictBoolean(
+      source.REVIEW_VERIFY_FINDINGS ?? "false",
+      "REVIEW_VERIFY_FINDINGS",
+    ),
+    adaptiveEffort: strictBoolean(
+      source.REVIEW_ADAPTIVE_EFFORT ?? "false",
+      "REVIEW_ADAPTIVE_EFFORT",
+    ),
+    ...loadReviewIsolationConfig(source),
+    model: modelIdentifier(source.CODEX_MODEL ?? "gpt-6.1-sol"),
     reasoningEffort: reasoningEffort(source.CODEX_REASONING_EFFORT ?? "high"),
-    timeoutMs: positiveInteger(source.CODEX_TIMEOUT_MS ?? "1800000", "CODEX_TIMEOUT_MS", 3_600_000),
+    timeoutMs: positiveInteger(
+      source.CODEX_TIMEOUT_MS ?? "1800000",
+      "CODEX_TIMEOUT_MS",
+      3_600_000,
+    ),
     codexBinary: commandName(source.CODEX_BINARY ?? "codex", "CODEX_BINARY"),
-    schemaPath: fileURLToPath(new URL("../codex/review-schema.json", import.meta.url)),
-    instructionsPath: fileURLToPath(new URL("../codex/review-instructions.md", import.meta.url)),
+    schemaPath: fileURLToPath(
+      new URL("../codex/review-coverage-schema.json", import.meta.url),
+    ),
+    instructionsPath: fileURLToPath(
+      new URL("../codex/review-instructions.md", import.meta.url),
+    ),
     abandonedWorktreeAgeMs: positiveInteger(
       source.ABANDONED_WORKTREE_AGE_MS ?? "86400000",
       "ABANDONED_WORKTREE_AGE_MS",
@@ -130,6 +186,24 @@ export async function loadPublisherWorkerConfig(
       32,
     ),
     appId,
+    enableCommentCommands: strictBoolean(
+      source.REVIEW_ENABLE_COMMENT_COMMANDS ?? "false",
+      "REVIEW_ENABLE_COMMENT_COMMANDS",
+    ),
+    findingContinuity: strictBoolean(
+      source.REVIEW_FINDING_CONTINUITY ?? "false",
+      "REVIEW_FINDING_CONTINUITY",
+    ),
+    enableChecks: strictBoolean(
+      source.REVIEW_ENABLE_CHECKS ?? "false",
+      "REVIEW_ENABLE_CHECKS",
+    ),
+    blockingPriority: boundedInteger(
+      source.REVIEW_BLOCKING_PRIORITY ?? "1",
+      "REVIEW_BLOCKING_PRIORITY",
+      0,
+      3,
+    ),
     privateKey: await readFile(privateKeyPath, "utf8"),
     brokerSocketPath: absolutePath(
       required(source.READ_TOKEN_BROKER_SOCKET, "READ_TOKEN_BROKER_SOCKET"),
@@ -163,17 +237,25 @@ export async function loadPublisherWorkerConfig(
   };
 }
 
-async function loadQueueRuntimeConfig(source: NodeJS.ProcessEnv): Promise<QueueRuntimeConfig> {
+async function loadQueueRuntimeConfig(
+  source: NodeJS.ProcessEnv,
+): Promise<QueueRuntimeConfig> {
   return {
     logLevel: parseLogLevel(source.LOG_LEVEL ?? "info"),
     redisUrl: parseRedisUrl(required(source.REDIS_URL, "REDIS_URL")),
-    reviewQueueName: queueName(source.REVIEW_QUEUE_NAME ?? "pull-request-reviews", "REVIEW_QUEUE_NAME"),
+    reviewQueueName: queueName(
+      source.REVIEW_QUEUE_NAME ?? "pull-request-reviews",
+      "REVIEW_QUEUE_NAME",
+    ),
     publicationQueueName: queueName(
       source.PUBLICATION_QUEUE_NAME ?? "pull-request-publications",
       "PUBLICATION_QUEUE_NAME",
     ),
     allowedRepositories: parseAllowedRepositories(
-      required(source.GITHUB_ALLOWED_REPOSITORIES, "GITHUB_ALLOWED_REPOSITORIES"),
+      required(
+        source.GITHUB_ALLOWED_REPOSITORIES,
+        "GITHUB_ALLOWED_REPOSITORIES",
+      ),
     ),
   };
 }
@@ -194,18 +276,22 @@ async function loadSecret(
     value = (await readFile(filePath, "utf8")).trimEnd();
   }
   if (value === undefined || value.length < 32 || /[\0\r\n]/.test(value)) {
-    throw new TypeError(`${name} must be a single-line secret of at least 32 characters`);
+    throw new TypeError(
+      `${name} must be a single-line secret of at least 32 characters`,
+    );
   }
   return value;
 }
 
 function required(value: string | undefined, name: string): string {
-  if (value === undefined || value.length === 0) throw new TypeError(`${name} is required`);
+  if (value === undefined || value.length === 0)
+    throw new TypeError(`${name} is required`);
   return value;
 }
 
 function positiveInteger(value: string, name: string, maximum: number): number {
-  if (!/^\d+$/.test(value)) throw new TypeError(`${name} must be a positive integer`);
+  if (!/^\d+$/.test(value))
+    throw new TypeError(`${name} must be a positive integer`);
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
     throw new TypeError(`${name} must be between 1 and ${maximum}`);
@@ -257,7 +343,17 @@ function queueName(value: string, name: string): string {
 }
 
 function parseLogLevel(value: string): string {
-  if (!new Set(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).has(value)) {
+  if (
+    !new Set([
+      "fatal",
+      "error",
+      "warn",
+      "info",
+      "debug",
+      "trace",
+      "silent",
+    ]).has(value)
+  ) {
     throw new TypeError("LOG_LEVEL is invalid");
   }
   return value;
@@ -269,13 +365,19 @@ function parseAllowedRepositories(value: string): ReadonlySet<string> {
     repositories.length === 0 ||
     repositories.some(
       (repository) =>
-        !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(repository),
+        !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(
+          repository,
+        ),
     )
   ) {
-    throw new TypeError("GITHUB_ALLOWED_REPOSITORIES must be a comma-separated owner/name list");
+    throw new TypeError(
+      "GITHUB_ALLOWED_REPOSITORIES must be a comma-separated owner/name list",
+    );
   }
   if (new Set(repositories).size !== repositories.length) {
-    throw new TypeError("GITHUB_ALLOWED_REPOSITORIES must not contain duplicates");
+    throw new TypeError(
+      "GITHUB_ALLOWED_REPOSITORIES must not contain duplicates",
+    );
   }
   return new Set(repositories);
 }
@@ -304,4 +406,16 @@ function reasoningEffort(value: string): ReasoningEffort {
     throw new TypeError("CODEX_REASONING_EFFORT is invalid");
   }
   return value as ReasoningEffort;
+}
+
+function boundedInteger(
+  value: string,
+  name: string,
+  minimum: number,
+  maximum: number,
+): number {
+  const result = boundedNumber(value, name, minimum, maximum);
+  if (!Number.isSafeInteger(result))
+    throw new TypeError(`${name} must be an integer`);
+  return result;
 }

@@ -9,6 +9,11 @@ COPY scripts ./scripts
 COPY src ./src
 RUN npm run build
 
+FROM node:24-bookworm-slim AS sandbox-build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev linux-libc-dev
+COPY native/review-sandbox.c /tmp/review-sandbox.c
+RUN gcc -O2 -Wall -Wextra -Werror /tmp/review-sandbox.c -o /tmp/review-sandbox
+
 FROM node:24-bookworm-slim AS production-dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -31,6 +36,7 @@ USER node
 CMD ["node", "dist/src/server.js"]
 
 FROM app-runtime AS analysis-runtime
+COPY --from=sandbox-build /tmp/review-sandbox /usr/local/bin/review-sandbox
 USER root
 ARG CODEX_CLI_VERSION
 RUN test -n "$CODEX_CLI_VERSION" \

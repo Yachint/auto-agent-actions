@@ -3,6 +3,7 @@ name: auto-agent-actions
 x-app-security: &app-security
   read_only: true
   init: true
+  stop_grace_period: 45s
   restart: unless-stopped
   cap_drop: [ALL]
   security_opt:
@@ -13,6 +14,20 @@ x-app-security: &app-security
 
 x-common-environment: &common-environment
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  REVIEW_VERIFY_FINDINGS: ${REVIEW_VERIFY_FINDINGS:-false}
+  REVIEW_ADAPTIVE_EFFORT: ${REVIEW_ADAPTIVE_EFFORT:-false}
+  REVIEW_FINDING_CONTINUITY: ${REVIEW_FINDING_CONTINUITY:-false}
+  REVIEW_BLOCKING_PRIORITY: ${REVIEW_BLOCKING_PRIORITY:-1}
+  REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS: ${REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS:-true}
+  REVIEW_ENABLE_COMMENT_COMMANDS: ${REVIEW_ENABLE_COMMENT_COMMANDS:-false}
+  REVIEW_ISOLATE_CODEX: ${REVIEW_ISOLATE_CODEX:-true}
+  CODEX_TIMEOUT_MS: ${CODEX_TIMEOUT_MS:-1800000}
+  REVIEW_POLICY_VERSION: ${REVIEW_POLICY_VERSION:-pipeline-v2}
+  CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:?set CODEX_CLI_VERSION}
+  CODEX_MODEL: ${CODEX_MODEL:-gpt-6.1-sol}
+  CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-high}
+  REVIEW_MINIMUM_CONFIDENCE: ${REVIEW_MINIMUM_CONFIDENCE:-0.8}
+  REVIEW_MAXIMUM_INLINE_COMMENTS: ${REVIEW_MAXIMUM_INLINE_COMMENTS:-20}
   REDIS_URL: redis://redis:6379
   REVIEW_QUEUE_NAME: ${REVIEW_QUEUE_NAME:-pull-request-reviews}
   PUBLICATION_QUEUE_NAME: ${PUBLICATION_QUEUE_NAME:-pull-request-publications}
@@ -23,7 +38,7 @@ services:
     image: ${REDIS_IMAGE:-redis:7.4-alpine}
     user: "redis:redis"
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "900", "1", "--save", "300", "10"]
+    command: ["redis-server", "--maxmemory", "${REDIS_MAX_MEMORY:-384mb}", "--maxmemory-policy", "noeviction", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "900", "1", "--save", "300", "10"]
     volumes:
       - redis-data:/data
     networks: [backend]
@@ -43,6 +58,7 @@ services:
       retries: 5
 
   server:
+    image: ${APP_IMAGE:-auto-agent-actions-app:local}
     <<: *app-security
     build:
       context: .
@@ -82,6 +98,7 @@ services:
       retries: 5
 
   publisher:
+    image: ${APP_IMAGE:-auto-agent-actions-app:local}
     <<: *app-security
     build:
       context: .
@@ -97,6 +114,9 @@ services:
       READ_TOKEN_BROKER_SOCKET: /run/auto-agent-actions/read-token-broker.sock
       READ_TOKEN_BROKER_SECRET_FILE: /run/secrets/read_token_broker_secret
       PUBLISHER_WORKER_CONCURRENCY: ${PUBLISHER_WORKER_CONCURRENCY:-5}
+      REVIEW_FINDING_CONTINUITY: ${REVIEW_FINDING_CONTINUITY:-false}
+      REVIEW_ENABLE_CHECKS: ${REVIEW_ENABLE_CHECKS:-false}
+      REVIEW_BLOCKING_PRIORITY: ${REVIEW_BLOCKING_PRIORITY:-1}
       REVIEW_MINIMUM_CONFIDENCE: ${REVIEW_MINIMUM_CONFIDENCE:-0.8}
       REVIEW_MAXIMUM_INLINE_COMMENTS: ${REVIEW_MAXIMUM_INLINE_COMMENTS:-20}
       REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS: ${REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS:-true}
@@ -113,6 +133,7 @@ services:
     cpus: 1.0
 
   analysis:
+    image: ${ANALYSIS_IMAGE:-auto-agent-actions-analysis:local}
     <<: *app-security
     build:
       context: .
@@ -131,10 +152,11 @@ services:
       REVIEW_DATA_DIR: /var/lib/auto-agent-actions
       REVIEW_WORKER_CONCURRENCY: ${REVIEW_WORKER_CONCURRENCY:-1}
       ABANDONED_WORKTREE_AGE_MS: ${ABANDONED_WORKTREE_AGE_MS:-86400000}
-      CODEX_MODEL: ${CODEX_MODEL:-gpt-5.6-sol}
+      CODEX_MODEL: ${CODEX_MODEL:-gpt-6.1-sol}
       CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-high}
       CODEX_TIMEOUT_MS: ${CODEX_TIMEOUT_MS:-1800000}
       CODEX_BINARY: codex
+      REVIEW_ISOLATE_CODEX: ${REVIEW_ISOLATE_CODEX:-true}
     secrets: [read_token_broker_secret]
     volumes:
       - token-broker:/run/auto-agent-actions:ro

@@ -10,6 +10,7 @@ export interface GitCommand {
   timeoutMs?: number;
   maxOutputBytes?: number;
   authentication?: GitCommandAuthentication;
+  signal?: AbortSignal;
 }
 
 export interface GitCommandAuthentication {
@@ -56,6 +57,7 @@ export function createGitExecutor(
         args,
         {
           cwd: command.cwd,
+          ...(command.signal === undefined ? {} : { signal: command.signal }),
           env: environment,
           encoding: "buffer",
           timeout: command.timeoutMs ?? DEFAULT_TIMEOUT_MS,

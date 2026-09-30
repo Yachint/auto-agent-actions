@@ -9,6 +9,10 @@ export interface ReviewRequest {
   readonly pullRequestNumber: number;
   readonly action: PullRequestAction;
   readonly headSha: string;
+  readonly baseBranch?: string;
+  readonly baseSha?: string;
+  readonly scopeSha?: string;
+  readonly rerunNonce?: string;
 }
 
 export interface ReviewQueue {
@@ -49,7 +53,13 @@ export function validateQueuedReviewRequest(value: unknown): ReviewRequest {
     "pullRequestNumber",
     "repository",
   ];
-  if (Object.keys(payload).sort().join(",") !== expectedKeys.sort().join(",")) {
+  const optionalKeys = ["baseBranch", "baseSha", "scopeSha", "rerunNonce"];
+  if (
+    expectedKeys.some((key) => !(key in payload)) ||
+    Object.keys(payload).some(
+      (key) => !expectedKeys.includes(key) && !optionalKeys.includes(key),
+    )
+  ) {
     throw new TypeError("review queue payload has unexpected properties");
   }
   if (
@@ -85,13 +95,55 @@ export function validateQueuedReviewRequest(value: unknown): ReviewRequest {
   }
   if (
     typeof payload.action !== "string" ||
-    !new Set(["opened", "reopened", "synchronize", "ready_for_review"]).has(
-      payload.action,
-    )
+    !new Set([
+      "opened",
+      "reopened",
+      "synchronize",
+      "ready_for_review",
+      "edited",
+    ]).has(payload.action)
   ) {
     throw new TypeError("review queue action is invalid");
   }
+  if (
+    payload.baseBranch !== undefined &&
+    (typeof payload.baseBranch !== "string" ||
+      payload.baseBranch.length === 0 ||
+      payload.baseBranch.length > 255 ||
+      /[\0\r\n]/.test(payload.baseBranch))
+  )
+    throw new TypeError("review base branch is invalid");
+  if (
+    payload.baseSha !== undefined &&
+    (typeof payload.baseSha !== "string" ||
+      !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(payload.baseSha))
+  )
+    throw new TypeError("review base SHA is invalid");
+  if (
+    payload.scopeSha !== undefined &&
+    (typeof payload.scopeSha !== "string" ||
+      !/^[0-9a-f]{64}$/.test(payload.scopeSha))
+  )
+    throw new TypeError("review scope is invalid");
+  if (
+    payload.rerunNonce !== undefined &&
+    (typeof payload.rerunNonce !== "string" ||
+      !/^[a-zA-Z0-9-]{1,100}$/.test(payload.rerunNonce))
+  )
+    throw new TypeError("review rerun nonce is invalid");
   return Object.freeze({
+    ...(payload.baseSha === undefined
+      ? {}
+      : { baseSha: payload.baseSha as string }),
+    ...(payload.baseBranch === undefined
+      ? {}
+      : { baseBranch: payload.baseBranch as string }),
+    ...(payload.scopeSha === undefined
+      ? {}
+      : { scopeSha: payload.scopeSha as string }),
+    ...(payload.rerunNonce === undefined
+      ? {}
+      : { rerunNonce: payload.rerunNonce as string }),
     deliveryId: payload.deliveryId,
     installationId: payload.installationId as number,
     repository: payload.repository,
@@ -104,6 +156,8 @@ export function validateQueuedReviewRequest(value: unknown): ReviewRequest {
 export function refreshedReviewRequest(
   request: ReviewRequest,
   headSha: string,
+  baseBranch?: string,
+  baseSha?: string,
 ): ReviewRequest {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(headSha)) {
     throw new TypeError("refreshed headSha must be a full Git object ID");
@@ -111,10 +165,28 @@ export function refreshedReviewRequest(
   const normalizedHead = headSha.toLowerCase();
   return Object.freeze({
     ...request,
+    ...(baseBranch === undefined ? {} : { baseBranch }),
+    ...(baseSha === undefined ? {} : { baseSha }),
     deliveryId: `refresh-${createHash("sha256")
-      .update(`${request.repository}#${request.pullRequestNumber}#${normalizedHead}`)
+      .update(
+        `${request.repository}#${request.pullRequestNumber}#${normalizedHead}`,
+      )
       .digest("hex")}`,
     action: "synchronize",
     headSha: normalizedHead,
+    ...(request.scopeSha === undefined
+      ? {}
+      : {
+          scopeSha: createHash("sha256")
+            .update(
+              `${normalizedHead}#${baseBranch ?? request.baseBranch ?? ""}#pipeline-v2`,
+            )
+            .digest("hex"),
+        }),
   });
+}
+
+/** State tracks a review scope rather than assuming a head uniquely identifies a PR diff. */
+export function reviewScope(request: ReviewRequest): string {
+  return request.scopeSha ?? request.headSha;
 }

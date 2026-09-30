@@ -1,3 +1,4 @@
+import { UsageCollector, type CodexUsage } from "./usage.js";
 import { spawn } from "node:child_process";
 import { readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +27,8 @@ export interface CodexRunnerOptions {
   outputPath: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  agentThreads?: 1 | 2 | 3;
+  expectedPaths?: readonly string[];
   prompt: string;
   timeoutMs: number;
   codexBinary?: string;
@@ -34,6 +37,8 @@ export interface CodexRunnerOptions {
   /** Maximum combined stdout/stderr bytes retained for diagnostics. */
   maxProcessOutputBytes?: number;
   maxReviewOutputBytes?: number;
+  signal?: AbortSignal;
+  onUsage?: (usage: CodexUsage) => void;
 }
 
 export interface CodexSandboxPreflightOptions {
@@ -50,6 +55,8 @@ export interface ProcessInvocation {
   environment: NodeJS.ProcessEnv;
   timeoutMs: number;
   maxOutputBytes: number;
+  signal?: AbortSignal;
+  jsonUsageOnly?: boolean;
 }
 
 export interface ProcessResult {
@@ -59,6 +66,7 @@ export interface ProcessResult {
   stderr: string;
   timedOut: boolean;
   outputTruncated: boolean;
+  usage?: CodexUsage;
 }
 
 export type ProcessExecutor = (
@@ -68,6 +76,7 @@ export type ProcessExecutor = (
 export class CodexExecutionError extends Error {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
+  failureKind?: "blocked" | "timeout";
 
   constructor(
     message: string,
@@ -104,7 +113,11 @@ export async function runCodexReview(
     environment: createCodexEnvironment(options.environment ?? process.env),
     timeoutMs: options.timeoutMs,
     maxOutputBytes: maxProcessOutputBytes,
+    jsonUsageOnly: true,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
+
+  if (result.usage !== undefined) options.onUsage?.(result.usage);
 
   if (result.timedOut) {
     throw new CodexExecutionError(
@@ -134,9 +147,30 @@ export async function runCodexReview(
     );
   }
 
-  const output = parseReviewOutput(await readFile(options.outputPath, "utf8"));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(options.outputPath, "utf8"));
+  } catch {
+    throw new CodexExecutionError("Codex returned invalid review JSON");
+  }
+  if (options.expectedPaths !== undefined)
+    validateCoverage(raw, options.expectedPaths);
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    "coverage" in raw
+  ) {
+    const { coverage: _coverage, ...review } = raw as Record<string, unknown>;
+    raw = review;
+  }
+  const output = parseReviewOutput(JSON.stringify(raw));
   if (output.status !== "completed") {
-    throw new CodexExecutionError("Codex could not complete the requested review");
+    const error = new CodexExecutionError(
+      "Codex could not complete the requested review",
+    );
+    error.failureKind = "blocked";
+    throw error;
   }
   return output;
 }
@@ -183,7 +217,9 @@ function describePreflightFailure(result: ProcessResult): string {
   if (result.outputTruncated) return "diagnostic output limit exceeded";
   if (result.signal !== null) return `terminated by ${result.signal}`;
 
-  const diagnostic = sanitizePreflightDiagnostic(result.stderr || result.stdout);
+  const diagnostic = sanitizePreflightDiagnostic(
+    result.stderr || result.stdout,
+  );
   if (diagnostic) return diagnostic;
   return `exit code ${result.exitCode ?? "unknown"}`;
 }
@@ -205,6 +241,7 @@ export function buildCodexArgs(
     | "outputPath"
     | "model"
     | "reasoningEffort"
+    | "agentThreads"
   >,
 ): string[] {
   return [
@@ -221,8 +258,11 @@ export function buildCodexArgs(
     "--ignore-user-config",
     "--ignore-rules",
     "--strict-config",
+    "-c",
+    "project_doc_max_bytes=0",
     "--color",
     "never",
+    "--json",
     "--output-schema",
     options.schemaPath,
     "--output-last-message",
@@ -234,9 +274,9 @@ export function buildCodexArgs(
     "-c",
     "features.apps=false",
     "-c",
-    "agents.enabled=true",
+    `agents.enabled=${options.agentThreads === 1 ? "false" : "true"}`,
     "-c",
-    "agents.max_concurrent_threads_per_session=3",
+    `agents.max_concurrent_threads_per_session=${options.agentThreads ?? 3}`,
     "-c",
     "agents.max_depth=1",
     "-c",
@@ -282,7 +322,9 @@ export const executeProcess: ProcessExecutor = async (
     const child = spawn(invocation.command, invocation.args, {
       env: invocation.environment,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
+    const usage = new UsageCollector();
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let capturedBytes = 0;
@@ -291,14 +333,42 @@ export const executeProcess: ProcessExecutor = async (
     let stopping = false;
     let settled = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
+
+    const killTree = (signal: NodeJS.Signals): void => {
+      try {
+        if (process.platform !== "win32" && child.pid !== undefined)
+          process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH")
+          child.kill(signal);
+      }
+    };
 
     const stopProcess = (): void => {
       if (stopping) return;
       stopping = true;
-      child.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), FORCE_KILL_DELAY_MS);
+      killTree("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        killTree("SIGKILL");
+        // Escaped descendants can retain inherited pipes. Bound draining too.
+        drainTimer = setTimeout(() => {
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+        }, FORCE_KILL_DELAY_MS);
+        drainTimer.unref();
+      }, FORCE_KILL_DELAY_MS);
       forceKillTimer.unref();
     };
+
+    const abort = (): void => {
+      timedOut = true;
+      stopProcess();
+    };
+    invocation.signal?.addEventListener("abort", abort, { once: true });
+    if (invocation.signal?.aborted) abort();
 
     const capture = (target: Buffer[], chunk: Buffer): void => {
       const remaining = invocation.maxOutputBytes - capturedBytes;
@@ -313,8 +383,13 @@ export const executeProcess: ProcessExecutor = async (
       if (chunk.length > remaining) outputTruncated = true;
     };
 
-    child.stdout.on("data", (chunk: Buffer) => capture(stdoutChunks, chunk));
-    child.stderr.on("data", (chunk: Buffer) => capture(stderrChunks, chunk));
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (invocation.jsonUsageOnly) usage.push(chunk);
+      else capture(stdoutChunks, chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (!invocation.jsonUsageOnly) capture(stderrChunks, chunk);
+    });
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -325,16 +400,21 @@ export const executeProcess: ProcessExecutor = async (
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
+      invocation.signal?.removeEventListener("abort", abort);
       clearTimeout(timeout);
       if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
       reject(error);
     });
 
     child.once("close", (exitCode, signal) => {
       if (settled) return;
+      killTree("SIGKILL");
       settled = true;
+      invocation.signal?.removeEventListener("abort", abort);
       clearTimeout(timeout);
       if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
       resolve({
         exitCode,
         signal,
@@ -342,15 +422,18 @@ export const executeProcess: ProcessExecutor = async (
         stderr: Buffer.concat(stderrChunks).toString("utf8"),
         timedOut,
         outputTruncated,
+        ...(invocation.jsonUsageOnly ? { usage: usage.totals() } : {}),
       });
     });
 
     child.stdin.on("error", (error: NodeJS.ErrnoException) => {
       if (error.code !== "EPIPE" && !settled) {
         settled = true;
+        invocation.signal?.removeEventListener("abort", abort);
         clearTimeout(timeout);
         if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
-        child.kill("SIGKILL");
+        if (drainTimer !== undefined) clearTimeout(drainTimer);
+        killTree("SIGKILL");
         reject(error);
       }
     });
@@ -370,9 +453,15 @@ function validateOptions(options: CodexRunnerOptions): void {
   }
 
   if (!options.model || /\s/.test(options.model)) {
-    throw new TypeError("model must be a non-empty identifier without whitespace");
+    throw new TypeError(
+      "model must be a non-empty identifier without whitespace",
+    );
   }
-  if (!["none", "low", "medium", "high", "xhigh", "max"].includes(options.reasoningEffort)) {
+  if (
+    !["none", "low", "medium", "high", "xhigh", "max"].includes(
+      options.reasoningEffort,
+    )
+  ) {
     throw new TypeError("reasoningEffort is not supported");
   }
 
@@ -410,5 +499,39 @@ async function assertTrustedPaths(options: CodexRunnerOptions): Promise<void> {
 
 function isPathInside(parent: string, candidate: string): boolean {
   const relative = path.relative(parent, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== "..")
+  );
+}
+
+function validateCoverage(value: unknown, paths: readonly string[]): void {
+  const fail = () => {
+    const error = new CodexExecutionError(
+      "Codex did not inspect every required component",
+    );
+    error.failureKind = "blocked";
+    throw error;
+  };
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return fail();
+  const coverage = (value as Record<string, unknown>).coverage;
+  if (!Array.isArray(coverage) || coverage.length !== paths.length)
+    return fail();
+  const expected = new Set(paths);
+  const seen = new Set<string>();
+  for (const item of coverage) {
+    if (typeof item !== "object" || item === null || Array.isArray(item))
+      return fail();
+    const entry = item as Record<string, unknown>;
+    if (
+      Object.keys(entry).sort().join(",") !== "path,status" ||
+      typeof entry.path !== "string" ||
+      !expected.has(entry.path) ||
+      seen.has(entry.path) ||
+      entry.status !== "inspected"
+    )
+      return fail();
+    seen.add(entry.path);
+  }
 }

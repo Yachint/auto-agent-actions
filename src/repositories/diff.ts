@@ -22,7 +22,16 @@ export interface DiffLineRange {
   end: number;
 }
 
-export type ChangedFileStatus = "A" | "M" | "D" | "R" | "C" | "T" | "U" | "X" | "B";
+export type ChangedFileStatus =
+  | "A"
+  | "M"
+  | "D"
+  | "R"
+  | "C"
+  | "T"
+  | "U"
+  | "X"
+  | "B";
 
 export interface ChangedFile {
   status: ChangedFileStatus;
@@ -33,7 +42,9 @@ export interface ChangedFile {
 }
 
 export interface ExactDiff {
+  /** Captured target tip; anchors are computed from mergeBaseSha to headSha. */
   baseSha: string;
+  mergeBaseSha?: string;
   headSha: string;
   files: ChangedFile[];
 }
@@ -55,7 +66,10 @@ export class DiffInspector {
     this.maxChangedFiles = options.maxChangedFiles ?? 500;
     this.maxPatchBytesPerFile = options.maxPatchBytesPerFile ?? 5 * 1024 * 1024;
 
-    if (!Number.isSafeInteger(this.maxChangedFiles) || this.maxChangedFiles < 1) {
+    if (
+      !Number.isSafeInteger(this.maxChangedFiles) ||
+      this.maxChangedFiles < 1
+    ) {
       throw new TypeError("maxChangedFiles must be a positive integer");
     }
     if (
@@ -83,8 +97,21 @@ export class DiffInspector {
       this.resolveCommit(worktreePath, headSha),
     ]);
     if (resolvedBase !== baseSha || resolvedHead !== headSha) {
-      throw new TypeError("diff SHAs must resolve to the exact requested commits");
+      throw new TypeError(
+        "diff SHAs must resolve to the exact requested commits",
+      );
     }
+    const mergeBases = decodeGitText(
+      await this.gitExecutor({
+        args: ["-C", worktreePath, "merge-base", "--all", baseSha, headSha],
+      }),
+    )
+      .trim()
+      .split(/\s+/);
+    if (mergeBases.length !== 1 || !FULL_GIT_SHA_PATTERN.test(mergeBases[0]!)) {
+      throw new TypeError("review requires one unambiguous merge base");
+    }
+    const mergeBaseSha = mergeBases[0]!.toLowerCase();
 
     const nameStatus = await this.gitExecutor({
       args: [
@@ -95,7 +122,8 @@ export class DiffInspector {
         "-z",
         "--find-renames",
         "--no-ext-diff",
-        baseSha,
+        "--no-textconv",
+        mergeBaseSha,
         headSha,
         "--",
       ],
@@ -117,13 +145,16 @@ export class DiffInspector {
 
       const patch = await this.gitExecutor({
         args: [
+          "--literal-pathspecs",
           "-C",
           worktreePath,
           "diff",
           "--unified=0",
           "--no-color",
           "--no-ext-diff",
-          baseSha,
+          "--find-renames",
+          "--no-textconv",
+          mergeBaseSha,
           headSha,
           "--",
           ...(file.previousPath === undefined ? [] : [file.previousPath]),
@@ -137,7 +168,7 @@ export class DiffInspector {
       });
     }
 
-    return { baseSha, headSha, files: inspectedFiles };
+    return { baseSha, mergeBaseSha, headSha, files: inspectedFiles };
   }
 
   private async resolveCommit(
@@ -184,7 +215,9 @@ export function isRangeOnRightSide(
   );
 }
 
-function parseNameStatus(buffer: Buffer): Omit<ChangedFile, "rightSideRanges">[] {
+function parseNameStatus(
+  buffer: Buffer,
+): Omit<ChangedFile, "rightSideRanges">[] {
   const fields = buffer.toString("utf8").split("\0");
   if (fields.at(-1) === "") fields.pop();
   const files: Omit<ChangedFile, "rightSideRanges">[] = [];
@@ -233,7 +266,11 @@ function parseRightSideRanges(patch: string): DiffLineRange[] {
     if (!match) continue;
     const start = Number.parseInt(match[1] ?? "", 10);
     const count = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(count) || count < 0) {
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(count) ||
+      count < 0
+    ) {
       throw new TypeError("Git returned an invalid diff hunk range");
     }
     if (count === 0) continue;

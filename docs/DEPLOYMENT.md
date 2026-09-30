@@ -32,7 +32,7 @@ cp .env.vps.example .env.vps
 chmod 600 .env.vps
 ```
 
-Set `CODEX_CLI_VERSION=0.151.0`, the release currently validated by this application. Upgrade it only after the image-build compatibility check, read-only sandbox smoke test, structured-output review path, and full application suite pass. Keep the Redis image version pinned; after validation, prefer immutable image digests.
+Set `CODEX_CLI_VERSION=0.155.1`, the release currently validated by this application. Upgrade it only after the image-build compatibility check, read-only sandbox smoke test, structured-output review path, and full application suite pass. Keep the Redis image version pinned; after validation, prefer immutable image digests.
 
 Set `APP_UID` and `APP_GID` in `.env.vps` to the numeric IDs reported by `id -u` and `id -g` for the deployment administrator. The image builds its unprivileged runtime account with those IDs so file-backed Compose secrets and the Codex credential bind mount remain readable without granting another host account access.
 
@@ -97,3 +97,8 @@ The analysis logs must contain `Codex read-only sandbox preflight passed` before
 - Rotate the webhook and broker secrets after suspected exposure. Rotate the GitHub App private key through GitHub and restart the publisher.
 - Apply OS and container image updates regularly, rerun the full test/build preflight, and inspect dependency audit results before rollout.
 - Monitor restart counts, Redis persistence errors, queue depth, failed jobs, stale-result discards, reconciliation failures, and disk usage.
+
+
+## September 2026 upgrade
+
+Read [PIPELINE_V2.md](PIPELINE_V2.md) before upgrading: the queue/state protocol requires a drained, coordinated worker restart and matching Redis backup for rollback. Pin Codex CLI 0.155.1 until a newer version passes both sandbox probes. The native job boundary needs Landlock ABI 4 or later; account-token refresh and live model routing require owner verification. Optional Checks and comment commands require App permission/event changes before enabling their environment flags.

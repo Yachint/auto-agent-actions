@@ -1,4 +1,13 @@
-import { lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -111,6 +120,51 @@ export class RepositoryManager {
     return { mirrorPath, baseSha, headSha };
   }
 
+  /** Offline replay imports only the two named snapshot refs; it never fetches a live PR. */
+  async importSnapshot(input: {
+    repository: string;
+    snapshotPath: string;
+    expectedBaseSha: string;
+    expectedHeadSha: string;
+  }): Promise<FetchedReviewRefs> {
+    validateRepository(input.repository);
+    validateFullSha("baseSha", input.expectedBaseSha);
+    validateFullSha("headSha", input.expectedHeadSha);
+    assertAbsolutePath("snapshotPath", input.snapshotPath);
+    if (!(await lstat(input.snapshotPath)).isFile())
+      throw new TypeError("snapshot must be a regular Git bundle");
+    const mirrorPath = await this.ensureMirror(input.repository);
+    await this.gitExecutor({
+      args: [`--git-dir=${mirrorPath}`, "bundle", "verify", input.snapshotPath],
+    });
+    await this.gitExecutor({
+      args: [
+        `--git-dir=${mirrorPath}`,
+        "fetch",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--",
+        input.snapshotPath,
+        "+refs/auto-agent-actions/snapshot/base:refs/auto-agent-actions/snapshot/base",
+        "+refs/auto-agent-actions/snapshot/head:refs/auto-agent-actions/snapshot/head",
+      ],
+    });
+    const baseSha = await this.resolveCommit(
+      mirrorPath,
+      "refs/auto-agent-actions/snapshot/base",
+    );
+    const headSha = await this.resolveCommit(
+      mirrorPath,
+      "refs/auto-agent-actions/snapshot/head",
+    );
+    if (
+      baseSha !== input.expectedBaseSha.toLowerCase() ||
+      headSha !== input.expectedHeadSha.toLowerCase()
+    )
+      throw new TypeError("snapshot SHA mismatch");
+    return { mirrorPath, baseSha, headSha };
+  }
+
   async createWorktree(input: {
     repository: string;
     pullRequestNumber: number;
@@ -131,7 +185,9 @@ export class RepositoryManager {
     const headSha = input.headSha.toLowerCase();
     const resolvedHead = await this.resolveCommit(suppliedMirror, headSha);
     if (resolvedHead !== headSha) {
-      throw new TypeError("headSha does not resolve to the exact requested commit");
+      throw new TypeError(
+        "headSha does not resolve to the exact requested commit",
+      );
     }
 
     const worktreeParent = path.join(
@@ -207,14 +263,22 @@ export class RepositoryManager {
     if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 1) {
       throw new TypeError("olderThanMs must be a positive integer");
     }
-    if (!Number.isFinite(now.getTime())) throw new TypeError("now must be a valid date");
+    if (!Number.isFinite(now.getTime()))
+      throw new TypeError("now must be a valid date");
     let removed = 0;
     for (const repository of repositories) {
       validateRepository(repository);
-      const repositoryRoot = path.join(this.dataDirectory, "worktrees", repository);
+      const repositoryRoot = path.join(
+        this.dataDirectory,
+        "worktrees",
+        repository,
+      );
       const mirrorPath = this.mirrorPath(repository);
       try {
-        if (!(await stat(repositoryRoot)).isDirectory() || !(await stat(mirrorPath)).isDirectory()) {
+        if (
+          !(await stat(repositoryRoot)).isDirectory() ||
+          !(await stat(mirrorPath)).isDirectory()
+        ) {
           continue;
         }
       } catch {
@@ -232,9 +296,18 @@ export class RepositoryManager {
       for (const pullRequestEntry of await readdir(resolvedRepositoryRoot, {
         withFileTypes: true,
       })) {
-        if (!pullRequestEntry.isDirectory() || !/^\d+$/.test(pullRequestEntry.name)) continue;
-        const pullRequestRoot = path.join(resolvedRepositoryRoot, pullRequestEntry.name);
-        for (const worktreeEntry of await readdir(pullRequestRoot, { withFileTypes: true })) {
+        if (
+          !pullRequestEntry.isDirectory() ||
+          !/^\d+$/.test(pullRequestEntry.name)
+        )
+          continue;
+        const pullRequestRoot = path.join(
+          resolvedRepositoryRoot,
+          pullRequestEntry.name,
+        );
+        for (const worktreeEntry of await readdir(pullRequestRoot, {
+          withFileTypes: true,
+        })) {
           if (
             !worktreeEntry.isDirectory() ||
             !/^[0-9a-f]{12}-[0-9a-f-]{36}$/i.test(worktreeEntry.name)
@@ -247,7 +320,9 @@ export class RepositoryManager {
           if (now.getTime() - metadata.mtimeMs < olderThanMs) continue;
           const resolvedWorktreePath = await realpath(worktreePath);
           if (!isPathInside(resolvedRepositoryRoot, resolvedWorktreePath)) {
-            throw new TypeError("cleanup worktree escaped the repository directory");
+            throw new TypeError(
+              "cleanup worktree escaped the repository directory",
+            );
           }
           try {
             await this.removeWorktree(resolvedMirrorPath, resolvedWorktreePath);
@@ -299,7 +374,10 @@ export class RepositoryManager {
     return resolved;
   }
 
-  private async resolveCommit(mirrorPath: string, revision: string): Promise<string> {
+  private async resolveCommit(
+    mirrorPath: string,
+    revision: string,
+  ): Promise<string> {
     return decodeGitText(
       await this.gitExecutor({
         args: [
@@ -347,9 +425,13 @@ export class RepositoryManager {
     const resolvedDataDirectory = await realpath(this.dataDirectory);
     const resolvedRuntimeRoot = await realpath(runtimeRoot);
     if (!isPathInside(resolvedDataDirectory, resolvedRuntimeRoot)) {
-      throw new TypeError("runtime authentication directory escaped the data directory");
+      throw new TypeError(
+        "runtime authentication directory escaped the data directory",
+      );
     }
-    const temporaryDirectory = await mkdtemp(path.join(resolvedRuntimeRoot, "git-"));
+    const temporaryDirectory = await mkdtemp(
+      path.join(resolvedRuntimeRoot, "git-"),
+    );
     const askPassPath = path.join(temporaryDirectory, "askpass.sh");
     await writeFile(
       askPassPath,
@@ -380,11 +462,16 @@ function validateFetchInput(input: FetchReviewRefsInput): void {
 
 function validateInstallationToken(token: string): void {
   if (token.length === 0 || token.includes("\0") || /[\r\n]/.test(token)) {
-    throw new TypeError("installationToken must be a non-empty single-line credential");
+    throw new TypeError(
+      "installationToken must be a non-empty single-line credential",
+    );
   }
 }
 
-function validateGitHubAuthenticatedRemote(repository: string, remoteUrl: string): void {
+function validateGitHubAuthenticatedRemote(
+  repository: string,
+  remoteUrl: string,
+): void {
   let url: URL;
   try {
     url = new URL(remoteUrl);
@@ -397,7 +484,9 @@ function validateGitHubAuthenticatedRemote(repository: string, remoteUrl: string
     url.port !== "" ||
     url.pathname.toLowerCase() !== `/${repository}.git`.toLowerCase()
   ) {
-    throw new TypeError("authenticated fetch URL must exactly match the GitHub repository");
+    throw new TypeError(
+      "authenticated fetch URL must exactly match the GitHub repository",
+    );
   }
 }
 
@@ -447,7 +536,9 @@ function validateRemoteUrl(remoteUrl: string): void {
   try {
     url = new URL(remoteUrl);
   } catch {
-    throw new TypeError("remoteUrl must be an absolute local path or HTTPS URL");
+    throw new TypeError(
+      "remoteUrl must be an absolute local path or HTTPS URL",
+    );
   }
 
   if (url.protocol !== "https:" || url.password || url.search || url.hash) {
@@ -460,5 +551,8 @@ function validateRemoteUrl(remoteUrl: string): void {
 
 function isPathInside(parent: string, candidate: string): boolean {
   const relative = path.relative(parent, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== "..")
+  );
 }

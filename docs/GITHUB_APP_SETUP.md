@@ -89,3 +89,8 @@ Start the stack using `docs/DEPLOYMENT.md`, then return to the App's Advanced se
 The initial delivery must receive a 2xx response over HTTPS. A supported pull-request event should receive `202 Accepted`; invalid signatures must receive `401`. Do not copy private payloads or headers containing signatures into public logs or issues.
 
 Continue with the live checks in `docs/ACCEPTANCE.md` before considering the first release ready.
+
+
+## Optional pipeline v2 features
+
+The default review path retains Contents read and Pull requests write. For `REVIEW_ENABLE_CHECKS=true`, additionally grant Checks write and accept the updated installation permissions. For `REVIEW_ENABLE_COMMENT_COMMANDS=true`, subscribe to Issue comment events. Commands are exact `/codex-review` messages, and the publisher independently verifies current commenter write/maintain/admin access. Keep both features disabled until their live acceptance checks pass. See [PIPELINE_V2.md](PIPELINE_V2.md).

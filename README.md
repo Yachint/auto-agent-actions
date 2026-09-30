@@ -1,6 +1,6 @@
 # Auto Agent Actions
 
-Self-hosted pull request reviews powered by Codex CLI. Milestones 1–3 are implemented: signed GitHub webhooks enter a durable Redis queue, an isolated analysis worker reviews the exact pull-request head, and a separately privileged publisher posts validated reviews. Milestone 4 deployment isolation, reconciliation, cleanup, health checks, and internal metrics are implemented locally; live container validation and GitHub App setup remain.
+Self-hosted pull request reviews powered by Codex CLI 0.155.1. The September 2026 pipeline update is implemented: signed GitHub webhooks enter a durable Redis queue, an isolated analysis worker reviews the exact pull-request head, and a separately privileged publisher posts validated reviews. Milestone 4 deployment isolation, reconciliation, cleanup, health checks, and internal metrics are implemented locally; See [the update and rollout guide](docs/PIPELINE_V2.md) for recovery semantics, Codex pin, optional features and remaining live acceptance checks.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ npm run build
 npm test
 ```
 
-The selected configuration is GPT-5.6 Sol with high reasoning effort and standard (non-fast) service. Authenticate once on the trusted VPS and verify the cached login:
+The selected configuration is GPT-6.1 Sol with high reasoning effort and standard (non-fast) service. Authenticate once on the trusted VPS and verify the cached login:
 
 ```bash
 codex login --device-auth
@@ -44,20 +44,20 @@ npm run review:fixture -- ./pull-request.json --remote /absolute/path/to/reposit
 Optional configuration:
 
 - `REVIEW_DATA_DIR` or `--data-dir`: mirror/worktree data directory; defaults to `.review-data`.
-- `CODEX_TIMEOUT_MS` or `--timeout-ms`: Codex timeout; defaults to 600000 ms.
+- `CODEX_TIMEOUT_MS` or `--timeout-ms`: Codex timeout; defaults to 1800000 ms.
 - `CODEX_BINARY`: Codex executable; defaults to `codex`.
-- `CODEX_MODEL` or `--model`: defaults to `gpt-5.6-sol`.
+- `CODEX_MODEL` or `--model`: defaults to `gpt-6.1-sol`.
 - `CODEX_REASONING_EFFORT` or `--reasoning-effort`: defaults to `high`.
 
 The command prints JSON to stdout. It never publishes to GitHub. Findings that cannot be anchored to changed right-side lines are listed under `rejected_findings` and omitted from `review.findings`.
 
 ## GitHub webhook status
 
-The server entry point exposes `POST /webhooks/github`, verifies the raw body signature, validates the event, applies the repository allowlist and no-fork policy, claims delivery IDs in Redis, and enqueues minimal immutable metadata. `GET /health/live` checks the process and `GET /health/ready` checks Redis.
+The server entry point exposes `POST /webhooks/github`, verifies the raw body signature, validates the event, applies the repository allowlist and no-fork policy, claims delivery IDs in Redis, and enqueues minimal immutable metadata. `GET /health/live` checks the process and `GET /health/ready` checks Redis and both worker heartbeats.
 
 See [`docs/REVIEW_TRIGGERS.md`](docs/REVIEW_TRIGGERS.md) for the exact events that do and do not trigger review, scheduled recovery behavior, and the current re-review procedure.
 
-The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. Reviews with publishable findings use `REQUEST_CHANGES` against the exact reviewed commit. By default, a successful review with no publishable inline findings posts a summary-only `COMMENT` so the reviewed outcome is visible without approving the pull request; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
+The trusted publisher uses repository-scoped GitHub App installation tokens, fetches the current PR state immediately before publishing, and discards closed, draft, forked, or stale-head results. P0/P1 findings use `REQUEST_CHANGES` against the exact reviewed commit; P2/P3 findings are advisory `COMMENT` reviews by default. By default, a successful review with no publishable inline findings posts a summary-only `COMMENT` so the reviewed outcome is visible without approving the pull request; set `REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS=false` to restore silent completion.
 
 Codex output explicitly distinguishes a completed review from a blocked inspection. Blocked output fails the analysis job and cannot enter the publication queue. On Linux deployments, the worker uses Codex's Landlock fallback because the VPS rejects Bubblewrap's nested network namespace. A startup probe proves the sandbox denies a real write before consuming jobs, preventing filesystem-sandbox failures from being mislabeled as successful no-finding reviews.
 
@@ -65,11 +65,11 @@ The GitHub App private key exists only in the publisher process. The analysis wo
 
 ## Queue status
 
-BullMQ uses separate analysis and publication queues. Analysis jobs are coalesced into one logical stream per repository and pull request: a short debounce replaces rapid waiting updates with the newest head, and an active review retains only one latest follow-up. Redis tracks the latest requested, currently running, and last reviewed head SHAs. Both workers revalidate persisted payloads and state; publication requires the matching lease, and stale results enqueue the newest API head instead of posting.
+BullMQ uses separate analysis and publication queues. A durable scope includes head, base branch, base tip, trusted policy and an optional forced-run nonce. Owner-fenced analysis leases, persisted publication artifacts and per-PR publication leases protect recovery. Reconciliation repairs orphaned scheduling intents and retained failed jobs. Results for obsolete scopes cannot publish. GitHub anchors are independently validated by the publisher.
 
 The first release uses Redis for BullMQ, delivery claims, and operational review state. Production deployment must enable Redis persistence and backups.
 
-The publisher periodically reconciles all open pull requests in allowlisted repositories, so a current head missed during downtime is re-enqueued. The analysis worker removes safely-contained abandoned worktrees older than the configured threshold at startup. Redis-backed counters and queue gauges are available at the internal `/metrics` endpoint; the Traefik router exposes only the exact webhook path.
+The publisher periodically reconciles all open pull requests in allowlisted repositories, so a current head missed during downtime is re-enqueued. The analysis worker removes safely-contained abandoned worktrees older than the configured threshold at startup and periodically. Redis-backed counters and queue gauges are available at the internal `/metrics` endpoint; the Traefik router exposes only the exact webhook path.
 
 ## Service entry points
 

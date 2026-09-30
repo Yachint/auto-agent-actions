@@ -1,14 +1,22 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import type { DeliveryClaims, ReviewQueue, ReviewRequest } from "../queue/review-queue.js";
+import type {
+  DeliveryClaims,
+  ReviewQueue,
+  ReviewRequest,
+} from "../queue/review-queue.js";
 
 const SUPPORTED_ACTIONS = new Set<PullRequestAction>([
   "opened",
   "reopened",
   "synchronize",
   "ready_for_review",
+  "edited",
 ]);
-const ACKNOWLEDGED_LIFECYCLE_EVENTS = new Set(["installation", "installation_repositories"]);
+const ACKNOWLEDGED_LIFECYCLE_EVENTS = new Set([
+  "installation",
+  "installation_repositories",
+]);
 const FULL_GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 const SIGNATURE_PATTERN = /^sha256=([0-9a-f]{64})$/i;
 
@@ -16,7 +24,8 @@ export type PullRequestAction =
   | "opened"
   | "reopened"
   | "synchronize"
-  | "ready_for_review";
+  | "ready_for_review"
+  | "edited";
 
 export interface GitHubWebhookHeaders {
   readonly signature: string;
@@ -29,6 +38,11 @@ export interface WebhookDependencies {
   readonly allowedRepositories: ReadonlySet<string>;
   readonly queue: ReviewQueue;
   readonly deliveryClaims: DeliveryClaims;
+  readonly commandQueue?: {
+    enqueueCommand(
+      request: import("../queue/publication-queue.js").CommentCommandRequest,
+    ): Promise<void>;
+  };
 }
 
 export class WebhookRequestError extends Error {
@@ -57,6 +71,59 @@ export async function acceptGitHubWebhook(
   }
   if (ACKNOWLEDGED_LIFECYCLE_EVENTS.has(headers.event)) {
     return Object.freeze({ ignored: true as const });
+  }
+  if (headers.event === "issue_comment") {
+    if (dependencies.commandQueue === undefined) return { ignored: true };
+    let value: unknown;
+    try {
+      value = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      throw new WebhookRequestError("webhook body must be valid JSON", 400);
+    }
+    const payload = requireRecord(value, "command payload");
+    const comment = requireRecord(payload.comment, "comment");
+    const issue = requireRecord(payload.issue, "issue");
+    const user = requireRecord(comment.user, "comment user");
+    if (
+      payload.action !== "created" ||
+      typeof issue.pull_request !== "object" ||
+      issue.pull_request === null ||
+      user.type !== "User" ||
+      typeof comment.body !== "string" ||
+      comment.body.trim() !== "/codex-review"
+    )
+      return { ignored: true };
+    const repository = requireString(
+      requireRecord(payload.repository, "repository").full_name,
+      "repository.full_name",
+    );
+    if (!dependencies.allowedRepositories.has(repository))
+      throw new WebhookRequestError("repository is not allowlisted", 403);
+    if (!(await dependencies.deliveryClaims.claim(headers.deliveryId)))
+      return { enqueued: false };
+    try {
+      await dependencies.commandQueue.enqueueCommand({
+        commentId: requirePositiveInteger(comment.id, "comment.id"),
+        reviewRequest: {
+          repository,
+          pullRequestNumber: requirePositiveInteger(
+            issue.number,
+            "issue.number",
+          ),
+          installationId: requirePositiveInteger(
+            requireRecord(payload.installation, "installation").id,
+            "installation.id",
+          ),
+          deliveryId: headers.deliveryId,
+          action: "synchronize",
+          headSha: "0".repeat(40),
+        },
+      });
+    } catch (error) {
+      await dependencies.deliveryClaims.release(headers.deliveryId);
+      throw error;
+    }
+    return { enqueued: true };
   }
   if (headers.event !== "pull_request") {
     throw new WebhookRequestError("unsupported GitHub event", 400);
@@ -98,7 +165,10 @@ export function verifyGitHubSignature(
   );
 }
 
-function parseReviewRequest(rawBody: Buffer, deliveryId: string): ReviewRequest {
+function parseReviewRequest(
+  rawBody: Buffer,
+  deliveryId: string,
+): ReviewRequest {
   let value: unknown;
   try {
     value = JSON.parse(rawBody.toString("utf8"));
@@ -113,7 +183,10 @@ function parseReviewRequest(rawBody: Buffer, deliveryId: string): ReviewRequest 
   }
 
   const repository = requireRecord(payload.repository, "repository");
-  const repositoryName = requireString(repository.full_name, "repository.full_name");
+  const repositoryName = requireString(
+    repository.full_name,
+    "repository.full_name",
+  );
   const installation = requireRecord(payload.installation, "installation");
   const pullRequest = requireRecord(payload.pull_request, "pull_request");
   const base = requireRecord(pullRequest.base, "pull_request.base");
@@ -125,18 +198,43 @@ function parseReviewRequest(rawBody: Buffer, deliveryId: string): ReviewRequest 
     throw new WebhookRequestError("pull request is not open", 422);
   }
   if (pullRequest.draft !== false) {
-    throw new WebhookRequestError("pull request is a draft or has invalid draft state", 422);
+    throw new WebhookRequestError(
+      "pull request is a draft or has invalid draft state",
+      422,
+    );
   }
-  if (requireString(baseRepository.full_name, "pull_request.base.repo.full_name") !== repositoryName) {
-    throw new WebhookRequestError("pull request base repository does not match repository", 400);
+  if (
+    requireString(
+      baseRepository.full_name,
+      "pull_request.base.repo.full_name",
+    ) !== repositoryName
+  ) {
+    throw new WebhookRequestError(
+      "pull request base repository does not match repository",
+      400,
+    );
   }
-  if (requireString(headRepository.full_name, "pull_request.head.repo.full_name") !== repositoryName) {
-    throw new WebhookRequestError("forked pull requests are not supported", 422);
+  if (
+    requireString(
+      headRepository.full_name,
+      "pull_request.head.repo.full_name",
+    ) !== repositoryName
+  ) {
+    throw new WebhookRequestError(
+      "forked pull requests are not supported",
+      422,
+    );
   }
 
-  const headSha = requireString(head.sha, "pull_request.head.sha").toLowerCase();
+  const headSha = requireString(
+    head.sha,
+    "pull_request.head.sha",
+  ).toLowerCase();
   if (!FULL_GIT_SHA_PATTERN.test(headSha)) {
-    throw new WebhookRequestError("pull_request.head.sha must be a full Git object ID", 400);
+    throw new WebhookRequestError(
+      "pull_request.head.sha must be a full Git object ID",
+      400,
+    );
   }
 
   return Object.freeze({
@@ -146,6 +244,10 @@ function parseReviewRequest(rawBody: Buffer, deliveryId: string): ReviewRequest 
     pullRequestNumber: requirePositiveInteger(payload.number, "number"),
     action: action as PullRequestAction,
     headSha,
+    ...(typeof base.sha === "string"
+      ? { baseSha: base.sha.toLowerCase() }
+      : {}),
+    ...(typeof base.ref === "string" ? { baseBranch: base.ref } : {}),
   });
 }
 

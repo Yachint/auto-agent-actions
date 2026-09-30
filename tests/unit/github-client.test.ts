@@ -24,11 +24,16 @@ describe("GitHub REST client", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       ),
     );
-    const client = new GitHubRestClient({ installationToken: "secret-token", fetch });
+    const client = new GitHubRestClient({
+      installationToken: "secret-token",
+      fetch,
+    });
 
     await expect(client.getPullRequest("owner/project", 7)).resolves.toEqual({
       state: "open",
       draft: false,
+      baseSha: "b".repeat(40),
+      baseBranch: "main",
       headSha,
       headRepository: "owner/project",
     });
@@ -63,8 +68,13 @@ describe("GitHub REST client", () => {
         { status: 200 },
       ),
     );
-    const client = new GitHubRestClient({ installationToken: "secret-token", fetch });
-    await expect(client.getPullRequestDetails("owner/project", 7)).resolves.toEqual({
+    const client = new GitHubRestClient({
+      installationToken: "secret-token",
+      fetch,
+    });
+    await expect(
+      client.getPullRequestDetails("owner/project", 7),
+    ).resolves.toEqual({
       state: "open",
       draft: false,
       headSha,
@@ -90,25 +100,35 @@ describe("GitHub REST client", () => {
         { status: 200 },
       ),
     );
-    const client = new GitHubRestClient({ installationToken: "secret-token", fetch });
-    await expect(client.listOpenPullRequests("owner/project")).resolves.toEqual([
-      {
-        pullRequestNumber: 7,
-        draft: false,
-        headSha,
-        headRepository: "owner/project",
-      },
-    ]);
+    const client = new GitHubRestClient({
+      installationToken: "secret-token",
+      fetch,
+    });
+    await expect(client.listOpenPullRequests("owner/project")).resolves.toEqual(
+      [
+        {
+          pullRequestNumber: 7,
+          draft: false,
+          headSha,
+          headRepository: "owner/project",
+        },
+      ],
+    );
     expect(fetch.mock.calls[0]![0]).toBe(
       "https://api.github.com/repos/owner/project/pulls?state=open&per_page=100&page=1",
     );
   });
 
   it("creates a changes-requested review using right-side line anchors", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ id: 99 }), { status: 200 }),
-    );
-    const client = new GitHubRestClient({ installationToken: "secret-token", fetch });
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 99 }), { status: 200 }),
+      );
+    const client = new GitHubRestClient({
+      installationToken: "secret-token",
+      fetch,
+    });
     await expect(
       client.createReview({
         repository: "owner/project",
@@ -116,7 +136,9 @@ describe("GitHub REST client", () => {
         commitId: headSha,
         body: "Summary",
         event: "REQUEST_CHANGES",
-        comments: [{ path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" }],
+        comments: [
+          { path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" },
+        ],
       }),
     ).resolves.toEqual({ reviewId: 99 });
     const request = fetch.mock.calls[0]![1]!;
@@ -124,19 +146,86 @@ describe("GitHub REST client", () => {
       commit_id: headSha,
       body: "Summary",
       event: "REQUEST_CHANGES",
-      comments: [{ path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" }],
+      comments: [
+        { path: "src/app.ts", body: "Finding", line: 5, side: "RIGHT" },
+      ],
     });
   });
 
   it("does not include response bodies or credentials in API errors", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ message: "sensitive response" }), { status: 403 }),
+      new Response(JSON.stringify({ message: "sensitive response" }), {
+        status: 403,
+      }),
     );
-    const client = new GitHubRestClient({ installationToken: "secret-token", fetch });
-    const error = await client.getPullRequest("owner/project", 7).catch((value: unknown) => value);
+    const client = new GitHubRestClient({
+      installationToken: "secret-token",
+      fetch,
+    });
+    const error = await client
+      .getPullRequest("owner/project", 7)
+      .catch((value: unknown) => value);
     expect(error).toBeInstanceOf(GitHubApiError);
     expect(String(error)).toBe("GitHubApiError: GitHub API returned HTTP 403");
     expect(String(error)).not.toContain("secret-token");
     expect(String(error)).not.toContain("sensitive response");
   });
+});
+
+it("preserves server backoff without leaking response bodies", async () => {
+  const client = new GitHubRestClient({
+    installationToken: "synthetic",
+    fetch: vi.fn().mockResolvedValue(
+      new Response("untrusted private error text", {
+        status: 429,
+        headers: { "retry-after": "120" },
+      }),
+    ),
+  });
+  await expect(client.getPullRequest("owner/project", 1)).rejects.toMatchObject(
+    { statusCode: 429, retryAfterMs: 120000 },
+  );
+  await expect(client.getPullRequest("owner/project", 1)).rejects.not.toThrow(
+    "untrusted private error text",
+  );
+});
+
+it("updates only checks owned by this App and scope", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async (url, init) => {
+      if (init?.method === "GET")
+        return new Response(
+          JSON.stringify({
+            check_runs: [
+              {
+                id: 10,
+                external_id: "auto-agent-actions:scope",
+                app: { id: 8 },
+              },
+              {
+                id: 11,
+                external_id: "auto-agent-actions:scope",
+                app: { id: 7 },
+              },
+            ],
+          }),
+        );
+      return new Response("{}");
+    });
+  await new GitHubRestClient({
+    installationToken: "synthetic",
+    appIdentity: { appId: 7, botLogin: "test-app[bot]" },
+    fetch,
+  }).setCheckStatus("owner/project", headSha, "scope", {
+    status: "completed",
+    conclusion: "neutral",
+  });
+  expect(fetch).toHaveBeenLastCalledWith(
+    "https://api.github.com/repos/owner/project/check-runs/11",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"conclusion":"neutral"'),
+    }),
+  );
 });

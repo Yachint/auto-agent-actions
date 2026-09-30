@@ -1,12 +1,9 @@
+import { loadReviewIsolationConfig } from "../config/runtime.js";
+import type { CodexUsage } from "../codex/usage.js";
 import type { ReasoningEffort } from "../codex/runner.js";
-import {
-  parsePullRequestFixture,
-} from "../github/pull-request-fixture.js";
+import { parsePullRequestFixture } from "../github/pull-request-fixture.js";
 import type { CompletedReviewOutput } from "../validation/review-output.js";
-import {
-  runReviewCore,
-  type ReviewCoreDependencies,
-} from "./review-core.js";
+import { runReviewCore, type ReviewCoreDependencies } from "./review-core.js";
 
 export interface LocalReviewOptions {
   fixture: unknown;
@@ -18,7 +15,12 @@ export interface LocalReviewOptions {
   instructionsPath: string;
   remoteUrlOverride?: string;
   codexBinary?: string;
+  sandboxBinary?: string;
   environment?: NodeJS.ProcessEnv;
+  snapshotPath?: string;
+  verifyFindings?: boolean;
+  adaptiveEffort?: boolean;
+  onUsage?: (usage: CodexUsage) => void;
 }
 
 export interface LocalReviewResult {
@@ -43,22 +45,45 @@ export async function runLocalReview(
   dependencies: LocalReviewDependencies = {},
 ): Promise<LocalReviewResult> {
   const event = parsePullRequestFixture(options.fixture);
-  const result = await runReviewCore({
-    repository: event.repository,
-    remoteUrl: options.remoteUrlOverride ?? event.remoteUrl,
-    baseBranch: event.baseBranch,
-    pullRequestNumber: event.pullRequestNumber,
-    expectedBaseSha: event.baseSha,
-    expectedHeadSha: event.headSha,
-    dataDirectory: options.dataDirectory,
-    model: options.model,
-    reasoningEffort: options.reasoningEffort,
-    timeoutMs: options.timeoutMs,
-    schemaPath: options.schemaPath,
-    instructionsPath: options.instructionsPath,
-    ...(options.codexBinary === undefined ? {} : { codexBinary: options.codexBinary }),
-    ...(options.environment === undefined ? {} : { environment: options.environment }),
-  }, dependencies);
+  const result = await runReviewCore(
+    {
+      ...(options.snapshotPath === undefined
+        ? {}
+        : { snapshotPath: options.snapshotPath }),
+      ...(options.adaptiveEffort === undefined
+        ? {}
+        : { adaptiveEffort: options.adaptiveEffort }),
+      ...(options.onUsage === undefined ? {} : { onUsage: options.onUsage }),
+      ...(options.verifyFindings === undefined
+        ? {}
+        : { verifyFindings: options.verifyFindings }),
+      ...loadReviewIsolationConfig({
+        ...(options.environment ?? process.env),
+        ...(options.sandboxBinary === undefined
+          ? {}
+          : { REVIEW_SANDBOX_BINARY: options.sandboxBinary }),
+      }),
+      repository: event.repository,
+      remoteUrl: options.remoteUrlOverride ?? event.remoteUrl,
+      baseBranch: event.baseBranch,
+      pullRequestNumber: event.pullRequestNumber,
+      expectedBaseSha: event.baseSha,
+      expectedHeadSha: event.headSha,
+      dataDirectory: options.dataDirectory,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      timeoutMs: options.timeoutMs,
+      schemaPath: options.schemaPath,
+      instructionsPath: options.instructionsPath,
+      ...(options.codexBinary === undefined
+        ? {}
+        : { codexBinary: options.codexBinary }),
+      ...(options.environment === undefined
+        ? {}
+        : { environment: options.environment }),
+    },
+    dependencies,
+  );
 
   return {
     repository: event.repository,

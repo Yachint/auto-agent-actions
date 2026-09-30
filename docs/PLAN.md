@@ -392,7 +392,7 @@ The checked-in Compose topology implements separate secrets and process boundari
 ## Confirmed first-release decisions
 
 1. Repositories may be public or private but must be explicitly allowlisted personal repositories. Forked pull requests are rejected; fork support is future scope.
-2. Reviews use `gpt-5.6-sol` with `high` reasoning effort and the standard non-fast service tier.
+2. Reviews use `gpt-6.1-sol` with `high` reasoning effort and the standard non-fast service tier.
 3. Reviews with publishable findings use `REQUEST_CHANGES`; completed reviews without publishable findings use an advisory `COMMENT` and do not approve the pull request.
 4. Repository-controlled agent guidance is ignored. Workers use only the trusted instructions stored outside review worktrees.
 5. The first release reuses a ChatGPT subscription login cached for the isolated VPS worker. Public-repository launch remains gated on deployment isolation review.
@@ -409,3 +409,8 @@ When making implementation choices, prioritize:
 2. No comments on stale or incorrect lines.
 3. Idempotent behavior under duplicate and rapid webhook delivery.
 4. Small, observable, independently testable components.
+
+
+## Implemented September 2026 update
+
+[PIPELINE_V2.md](PIPELINE_V2.md) records the implemented recovery protocol, merge-base and independent anchor validation, job isolation, immutable evaluation, optional verification/adaptive effort, authorized re-review commands, Check Runs, finding continuity and CI/operational changes. Older future-scope descriptions above remain historical product planning; use the update guide and source for current feature availability. Model quality benchmarks, live App/model acceptance, per-job cgroups, closed-repository mirror retention and production promotion remain operational/future work.
