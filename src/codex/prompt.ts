@@ -31,7 +31,7 @@ Comparison SHA (frozen merge base): ${comparisonSha}
 </trusted_metadata>
 
 <exact_scope>
-Review only the changes between the frozen comparison SHA and head SHA above. Begin with the right-hand side of \`git diff ${comparisonSha} ${headSha}\`. The base tip is provenance, not the comparison start. Inspect surrounding repository code only as needed to trace the behavior of changed lines. Do not substitute a branch tip or different commit. Use literal Git pathspecs when inspecting repository filenames.
+Review only the changes between the frozen comparison SHA and head SHA above. Use the trusted changed-path inventory, then inspect the right-hand side of \`git diff ${comparisonSha} ${headSha}\` in small groups of literal paths. The base tip is provenance, not the comparison start. Inspect surrounding repository code only as needed to trace the behavior of changed lines. Do not substitute a branch tip or different commit. Use literal Git pathspecs when inspecting repository filenames. When tool output is truncated, narrow the paths or paginate the output and continue inspection; a bounded tool response alone is not a blocker.
 </exact_scope>
 
 <completion>

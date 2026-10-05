@@ -1,4 +1,4 @@
-import { UsageCollector, type CodexUsage } from "./usage.js";
+import { UsageCollector, type CodexUsage, type ToolFailureDiagnostics } from "./usage.js";
 import type { ModelUsageLimitError } from "./model-limit.js";
 import { spawn } from "node:child_process";
 import { readFile, realpath, rm, stat } from "node:fs/promises";
@@ -69,6 +69,7 @@ export interface ProcessResult {
   outputTruncated: boolean;
   usage?: CodexUsage;
   modelLimit?: ModelUsageLimitError;
+  toolFailures?: ToolFailureDiagnostics;
 }
 
 export type ProcessExecutor = (
@@ -78,13 +79,15 @@ export type ProcessExecutor = (
 export class CodexExecutionError extends Error {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
+  readonly toolFailures: ToolFailureDiagnostics | undefined;
   failureKind?: "blocked" | "timeout";
   failureReason?: "coverage-incomplete" | "model-blocked";
   blockedCapabilities?: string[];
+  blockedKeywords?: string[];
 
   constructor(
     message: string,
-    result: Pick<ProcessResult, "exitCode" | "signal"> = {
+    result: Pick<ProcessResult, "exitCode" | "signal" | "toolFailures"> = {
       exitCode: null,
       signal: null,
     },
@@ -93,6 +96,7 @@ export class CodexExecutionError extends Error {
     this.name = "CodexExecutionError";
     this.exitCode = result.exitCode;
     this.signal = result.signal;
+    this.toolFailures = result.toolFailures;
   }
 }
 
@@ -172,6 +176,7 @@ export async function runCodexReview(
   if (output.status !== "completed") {
     const error = new CodexExecutionError(
       "Codex could not complete the requested review",
+      result,
     );
     error.failureKind = "blocked";
     error.failureReason = "model-blocked";
@@ -183,10 +188,23 @@ export async function runCodexReview(
       ["tooling", /tool|exec|command/i],
     ].filter(([, pattern]) => (pattern as RegExp).test(output.blocked_reason))
       .map(([name]) => name as string);
+    // A fixed vocabulary preserves diagnostic signals without retaining model text,
+    // repository paths, snippets, identifiers or credentials in logs/errors.
+    const words = new Set([
+      "git", "diff", "commands", "command", "tool", "tools", "exec", "execute",
+      "failed", "failure", "unavailable", "unsupported", "empty", "output",
+      "truncated", "permission", "denied", "sandbox", "namespace", "timeout",
+      "context", "limit", "size", "commit", "revision", "object", "history",
+      "directory", "ownership", "dubious", "lock", "read", "inspect", "inspection",
+      "cannot", "could", "not", "unable", "because", "no", "required", "errors",
+      "binary", "deleted", "missing", "partial", "responses", "returned", "status",
+    ]);
+    error.blockedKeywords = output.blocked_reason.toLowerCase().split(/[^a-z]+/)
+      .filter((word) => words.has(word)).slice(0, 40);
     throw error;
   }
   if (options.expectedPaths !== undefined)
-    validateCoverage(coverageOutput, options.expectedPaths);
+    validateCoverage(coverageOutput, options.expectedPaths, result);
   return output;
 }
 
@@ -319,7 +337,7 @@ export function createCodexEnvironment(
     "COMSPEC",
     "PATHEXT",
   ];
-  const environment: NodeJS.ProcessEnv = {};
+  const environment: NodeJS.ProcessEnv = { GIT_OPTIONAL_LOCKS: "0" };
 
   for (const name of allowedNames) {
     if (source[name] !== undefined) {
@@ -439,6 +457,7 @@ export const executeProcess: ProcessExecutor = async (
         outputTruncated,
         ...(invocation.jsonUsageOnly ? { usage: usage.totals() } : {}),
         ...(usage.limit() === undefined ? {} : { modelLimit: usage.limit()! }),
+        ...(invocation.jsonUsageOnly ? { toolFailures: usage.toolFailures() } : {}),
       });
     });
 
@@ -523,10 +542,11 @@ function isPathInside(parent: string, candidate: string): boolean {
   );
 }
 
-function validateCoverage(value: unknown, paths: readonly string[]): void {
+function validateCoverage(value: unknown, paths: readonly string[], result: ProcessResult): void {
   const fail = () => {
     const error = new CodexExecutionError(
       "Codex did not inspect every required component",
+      result,
     );
     error.failureKind = "blocked";
     error.failureReason = "coverage-incomplete";

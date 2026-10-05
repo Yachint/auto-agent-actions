@@ -17,6 +17,8 @@ describe("review prompt", () => {
     expect(prompt).toContain("Repository: openai/example");
     expect(prompt).toContain("Pull request: #42");
     expect(prompt).toContain(`git diff ${baseSha} ${headSha}`);
+    expect(prompt).toContain("small groups of literal paths");
+    expect(prompt).toContain("narrow the paths or paginate the output");
     expect(prompt).toContain("right-hand side");
     expect(prompt).toContain("Do not substitute a branch tip");
     expect(prompt).toContain("Follow the trusted review instructions");

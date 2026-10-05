@@ -56,6 +56,19 @@ describe("model usage backoff", () => {
     expect(collector.limit()).toBeInstanceOf(ModelUsageLimitError);
     expect(collector.limit()?.message).not.toContain("private content");
   });
+  it("keeps only bounded safe metadata from failed command events", () => {
+    const collector = new UsageCollector();
+    collector.push(Buffer.from(JSON.stringify({
+      type: "item.completed", item: {type: "command_execution", exit_code: 127,
+        aggregated_output: "rg: command not found; private repository text and secret", command: "private command"},
+    })+'\n'));
+    collector.push(Buffer.from(JSON.stringify({
+      type: "item.completed", item: {type: "command_execution", exit_code: 128,
+        aggregated_output: "fatal: bad object private-identifier"},
+    })+'\n'));
+    expect(collector.toolFailures()).toEqual({exitCodes: [127,128], categories: ["command-not-found","git-missing-object"]});
+    expect(JSON.stringify(collector.toolFailures())).not.toContain("private");
+  });
   it("defers wrapped failures and stops reconciled/restarted jobs before analysis", async () => {
     const operation = vi.fn().mockRejectedValue(new AnalysisAttemptError("attempt", new ModelUsageLimitError(now + 18_000_000)));
     const store = { remainingMs: vi.fn().mockResolvedValue(0), defer: vi.fn().mockResolvedValue(18_000_000) };

@@ -150,7 +150,7 @@ export class BullMqReviewQueue implements ReviewQueue {
       await this.#queue.add("review", Object.freeze({ ...request }), {
         jobId,
         delay: this.#debounceMs,
-        attempts: 3,
+        attempts: 2,
         backoff: { type: "exponential", delay: 1_000 },
         removeOnComplete: { age: 7 * 24 * 60 * 60, count: 1_000 },
         removeOnFail: { age: 30 * 24 * 60 * 60, count: 1_000 },

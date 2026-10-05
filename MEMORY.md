@@ -226,6 +226,8 @@ This file is the durable, chronological handoff for future development sessions.
 
 - Authorized deployment of `d86c666` passed image/sandbox preflights, a synthetic single-agent Git canary, and live Redis cooldown checks. The first current-head review was blocked without hitting quota. Added safe model-blocked versus coverage-incomplete diagnostics and clarified that disabled delegation is not a review blocker; 198 standard tests pass before the follow-up deployment.
 
+- The 123-file live scope remained model-blocked with Git/tooling signals, while a synthetic exact-scope canary verified both frozen commits and diff inspection under isolation without model spending. Added explicit small-path/paginated inspection guidance, forced optional Git locks off, bounded analysis to two attempts, and fixed-vocabulary blocker diagnostics before continuing live acceptance. TypeScript build and 199 standard tests passed; seven optional platform/infrastructure tests were skipped.
+
 ## Unresolved decisions
 
 - Redis backup/restore rehearsal remains required for disaster-recovery confidence.

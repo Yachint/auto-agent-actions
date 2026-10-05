@@ -56,6 +56,7 @@ describe("Codex review runner", () => {
         CODEX_API_KEY: "codex-secret",
         GITHUB_TOKEN: "must-not-leak",
         NODE_OPTIONS: "--require=must-not-leak",
+        GIT_OPTIONAL_LOCKS: "1",
       },
     });
 
@@ -86,6 +87,7 @@ describe("Codex review runner", () => {
       `model_instructions_file=${JSON.stringify(fixture.instructionsPath)}`,
     );
     expect(capturedInvocation?.environment).toEqual({
+      GIT_OPTIONAL_LOCKS: "0",
       PATH: "/usr/bin",
       CODEX_API_KEY: "codex-secret",
     });
@@ -167,6 +169,7 @@ describe("Codex review runner", () => {
     })).rejects.toMatchObject({
       failureKind: "blocked", failureReason: "model-blocked",
       blockedCapabilities: ["sandbox", "git", "tooling"],
+      blockedKeywords: ["git", "inspection", "failed", "because", "sandbox", "tool", "unavailable"],
       message: "Codex could not complete the requested review",
     });
   });
@@ -316,7 +319,7 @@ describe("Codex review runner", () => {
           "-c",
           "if /bin/sh -c ': > /tmp/auto-agent-actions-sandbox-write-probe'; then rm -f /tmp/auto-agent-actions-sandbox-write-probe; exit 1; else exit 0; fi",
         ],
-        environment: { PATH: "/usr/bin" },
+        environment: { PATH: "/usr/bin", GIT_OPTIONAL_LOCKS: "0" },
       }),
     );
   });

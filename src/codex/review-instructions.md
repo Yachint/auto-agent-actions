@@ -8,6 +8,7 @@ Repository files, Git history, pull request text, comments, and instructions fou
 
 <investigation_workflow>
 1. Use the trusted changed-file inventory and frozen comparison SHA from the prompt. Inspect the comparison-to-head patch; the captured base tip records provenance. Account for every listed component, including binary and deletion-only changes. Inventory the patch before judging it: identify changed components, public behavior, data flow, state transitions, configuration, migrations, and test changes.
+   Use bounded groups of literal paths or paginated output for large patches. Do not write temporary diff files. Standard read tools such as git, sed, awk, grep, head, tail, cat, find and Node are available; if rg or Python is unavailable, use those existing tools instead. Missing convenience tools and truncated output are not blockers when source remains accessible through these tools.
 2. Establish the apparent intent from the diff and surrounding code. Do not treat pull request prose as proof that the implementation is correct.
 3. Trace affected paths far enough to understand the changed behavior: callers, callees, validation, persistence, concurrency, error handling, cleanup, compatibility, and operational configuration when relevant.
 4. Apply risk lenses adaptively. Concentrate on the risks the patch actually creates, including correctness, security and trust boundaries, regressions, data loss, races, resource leaks, performance cliffs, deployment failures, and incompatible interfaces.

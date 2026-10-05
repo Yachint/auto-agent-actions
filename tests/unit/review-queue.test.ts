@@ -42,7 +42,7 @@ describe("durable review queue behavior", () => {
       request(newHead, "delivery-2"),
       expect.objectContaining({
         delay: 2_000,
-        attempts: 3,
+        attempts: 2,
         backoff: { type: "exponential", delay: 1_000 },
       }),
     );

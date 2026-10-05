@@ -192,6 +192,8 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
                 failureKind: failure.failureKind,
                 failureReason: failure.failureReason,
                 blockedCapabilities: failure.blockedCapabilities,
+                blockedKeywords: failure.blockedKeywords,
+                toolFailures: failure.toolFailures,
               }
             : {}),
         },
