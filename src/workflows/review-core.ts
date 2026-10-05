@@ -1,4 +1,5 @@
 import type { CodexUsage } from "../codex/usage.js";
+import { loadReviewAgentThreads } from "../config/runtime.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -41,6 +42,7 @@ export interface ReviewCoreOptions {
   snapshotPath?: string;
   verifyFindings?: boolean;
   adaptiveEffort?: boolean;
+  agentThreads?: 1 | 2 | 3;
   onUsage?: (usage: CodexUsage) => void;
   signal?: AbortSignal;
   sandboxBinary?: string;
@@ -153,14 +155,11 @@ export async function runReviewCore(
           instructionsPath: options.instructionsPath,
           outputPath,
           model: options.model,
-          reasoningEffort: options.adaptiveEffort
-            ? small
-              ? "medium"
-              : exactDiff.files.length >= 40 || highRisk
-                ? "xhigh"
-                : options.reasoningEffort
-            : options.reasoningEffort,
-          ...(options.adaptiveEffort ? { agentThreads: small ? 1 : 3 } : {}),
+          ...reviewResourcePolicy(
+            options.reasoningEffort,
+            options.agentThreads ?? loadReviewAgentThreads(options.environment),
+            options.adaptiveEffort === true && small,
+          ),
           prompt:
             buildReviewPrompt({
               repository: options.repository,
@@ -220,7 +219,25 @@ export async function runReviewCore(
   );
 }
 
+/** Adaptation may reduce resource use, never exceed explicit operator ceilings. */
+export function reviewResourcePolicy(
+  reasoningEffort: ReasoningEffort,
+  agentThreads: 1 | 2 | 3,
+  small: boolean,
+) {
+  const efforts: ReasoningEffort[] = ["none", "low", "medium", "high", "xhigh", "max"];
+  return {
+    reasoningEffort:
+      small && efforts.indexOf(reasoningEffort) > efforts.indexOf("medium")
+        ? "medium" as const
+        : reasoningEffort,
+    agentThreads: small ? 1 as const : agentThreads,
+  };
+}
+
 function validateOptions(options: ReviewCoreOptions): void {
+  if (options.agentThreads !== undefined && ![1, 2, 3].includes(options.agentThreads))
+    throw new TypeError("agentThreads must be between 1 and 3");
   for (const [name, value] of [
     ["dataDirectory", options.dataDirectory],
     ["schemaPath", options.schemaPath],

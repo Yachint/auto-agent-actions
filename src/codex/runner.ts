@@ -1,4 +1,5 @@
 import { UsageCollector, type CodexUsage } from "./usage.js";
+import type { ModelUsageLimitError } from "./model-limit.js";
 import { spawn } from "node:child_process";
 import { readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -67,6 +68,7 @@ export interface ProcessResult {
   timedOut: boolean;
   outputTruncated: boolean;
   usage?: CodexUsage;
+  modelLimit?: ModelUsageLimitError;
 }
 
 export type ProcessExecutor = (
@@ -118,6 +120,7 @@ export async function runCodexReview(
   });
 
   if (result.usage !== undefined) options.onUsage?.(result.usage);
+  if (result.modelLimit !== undefined) throw result.modelLimit;
 
   if (result.timedOut) {
     throw new CodexExecutionError(
@@ -274,9 +277,9 @@ export function buildCodexArgs(
     "-c",
     "features.apps=false",
     "-c",
-    `agents.enabled=${options.agentThreads === 1 ? "false" : "true"}`,
+    `agents.enabled=${(options.agentThreads ?? 1) > 1}`,
     "-c",
-    `agents.max_concurrent_threads_per_session=${options.agentThreads ?? 3}`,
+    `agents.max_concurrent_threads_per_session=${options.agentThreads ?? 1}`,
     "-c",
     "agents.max_depth=1",
     "-c",
@@ -423,6 +426,7 @@ export const executeProcess: ProcessExecutor = async (
         timedOut,
         outputTruncated,
         ...(invocation.jsonUsageOnly ? { usage: usage.totals() } : {}),
+        ...(usage.limit() === undefined ? {} : { modelLimit: usage.limit()! }),
       });
     });
 
@@ -441,6 +445,8 @@ export const executeProcess: ProcessExecutor = async (
   });
 
 function validateOptions(options: CodexRunnerOptions): void {
+  if (options.agentThreads !== undefined && ![1, 2, 3].includes(options.agentThreads))
+    throw new TypeError("agentThreads must be between 1 and 3");
   for (const [name, value] of [
     ["worktreePath", options.worktreePath],
     ["schemaPath", options.schemaPath],

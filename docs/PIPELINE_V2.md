@@ -22,6 +22,12 @@ Pin **0.155.1**. Both 0.155.1 and the current 0.159.2 were checked locally. The 
 
 The proxy accepts API-key credentials or the access token/account ID in trusted `CODEX_HOME/auth.json`. It does not refresh account OAuth tokens. A 401/403 opens a five-minute analysis pause and readiness failure; renew credentials on the trusted host. Account endpoint compatibility and renewal still require a live owner canary. The synthetic canary uses a fake upstream and spends no model tokens.
 
+Usage-limit errors and HTTP 429 responses defer analysis through a queue-wide Redis cooldown and BullMQ's limiter. Jobs remain pending without spending retry attempts or publishing failure comments; reconciliation cannot bypass the cooldown, and it survives worker restarts. Structured reset timestamps and `Retry-After` determine the delay. Quota exhaustion without a usable reset falls back to five hours; unclassified HTTP throttling falls back to one minute. The analysis heartbeat is unavailable during a cooldown. Logs contain only safe error types, failure codes and reset timestamps, never upstream response text.
+
+`CODEX_AGENT_THREADS` is an explicit ceiling of 1–3, defaulting to 1 (delegation disabled). It is shared by all services and included in review policy identity. Adaptive effort may lower effort or thread count, but never raises either above configured ceilings. Changing policy settings can schedule fresh reviews of previously handled scopes, so coordinate the settings across services. A subscription with a small allowance may still be insufficient for a single large review; reduced concurrency and effort do not guarantee completion.
+
+The isolated model proxy counts usage from each bounded terminal Responses event, including delegated calls and calls completed before a later failure. CLI usage is excluded in this mode to avoid double counting. Direct CLI execution retains its usage collector and detects JSON usage-limit events. Upstream calls that end without usage, malformed events and events exceeding the 64 KiB observer limit cannot be counted; these counters are observed token usage, not a complete billing ledger. The event fields follow the [Responses streaming reference](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
 Timeouts signal the process group, force termination, bound pipe draining and cancel upstream requests. This is not a cgroup/container per job: a child that deliberately creates a new session can outlive group termination. Container PID/memory/CPU limits remain required. No reviewed project programs, tests or dependency scripts may be run.
 
 ## Optional review features
@@ -30,7 +36,7 @@ All quality/product features below are off by default:
 
 | Setting | Behavior |
 | --- | --- |
-| `REVIEW_ADAPTIVE_EFFORT=true` | Smaller ordinary changes use medium effort and one agent; risky paths/large changes receive more effort. Benchmark first. |
+| `REVIEW_ADAPTIVE_EFFORT=true` | Smaller ordinary changes use at most medium effort and one agent; other changes retain configured effort/thread ceilings. Benchmark first. |
 | `REVIEW_VERIFY_FINDINGS=true` | A second read-only pass validates candidates; it cannot introduce new finding identities. Additional latency and model cost. |
 | `REVIEW_FINDING_CONTINUITY=true` | Repeated unresolved findings link to existing App threads instead of duplicating inline comments. Identity uses normalized path/title/body, so wording changes can still create duplicates. |
 | `REVIEW_ENABLE_CHECKS=true` | App-owned Check Runs expose queued, running and completed outcomes. Add Checks write permission to the App and reinstall/update permissions first. |

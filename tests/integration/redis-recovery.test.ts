@@ -7,6 +7,9 @@ import { RedisReviewStateStore } from "../../src/queue/redis-review-state.js";
 import { reviewStateRedisKey } from "../../src/queue/review-state.js";
 import { BullMqReviewQueue } from "../../src/queue/bullmq-review-queue.js";
 import { BullMqPublicationQueue } from "../../src/queue/publication-queue.js";
+import { ModelCooldownStore } from "../../src/queue/model-cooldown.js";
+import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
+import { runWithModelCooldown } from "../../src/workflows/model-cooldown.js";
 
 const enabled = process.env.RUN_REDIS_TEST === "1";
 const suffix = randomUUID().replaceAll("-", "");
@@ -46,6 +49,49 @@ describe.skipIf(!enabled)("real Redis/BullMQ pipeline recovery", () => {
     if (redis) {
       await redis.del(reviewStateRedisKey(repository, 1));
       await redis.quit();
+    }
+  });
+
+  it("persists quota cooldown across store/worker recreation without spending a retry", async () => {
+    const name = `aaa-model-cooldown-${suffix}`;
+    const queue = new Queue(name, { connection: redis });
+    queues.push(queue);
+    let calls = 0;
+    const makeWorker = () => new Worker(name, async () => runWithModelCooldown(async (): Promise<string> => {
+      calls++;
+      throw new ModelUsageLimitError(Date.now() + 60_000);
+    }, {
+      store: new ModelCooldownStore(redis, name),
+      rateLimit: (delayMs) => worker.rateLimit(delayMs),
+      onBlocked: async () => {},
+    }), { connection: redis, limiter: { max: 10, duration: 1000 } });
+    let worker: Worker = makeWorker();
+    workers.push(worker);
+    try {
+      const job = await queue.add("review", {}, { attempts: 3 });
+      for (let index = 0; index < 100; index++) {
+        if (await new ModelCooldownStore(redis, name).remainingMs() > 0 && await job.getState() === "waiting") break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(calls).toBe(1);
+      expect((await queue.getJob(job.id!))?.attemptsMade).toBe(0);
+      expect(await job.getState()).toBe("waiting");
+      await worker.close();
+      worker = makeWorker();
+      workers.push(worker);
+      // Even if BullMQ's limiter is reset externally, the durable gate prevents spend.
+      await queue.removeRateLimitKey();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(calls).toBe(1);
+      expect((await queue.getJob(job.id!))?.attemptsMade).toBe(0);
+      const store = new ModelCooldownStore(redis, name);
+      const remaining = await store.remainingMs();
+      const shorter = await store.defer(Date.now() + 1000);
+      expect(shorter).toBeGreaterThan(remaining - 1000);
+    } finally {
+      await worker.close();
+      const { createHash } = await import("node:crypto");
+      await redis.del(`auto-agent-actions:model-cooldown:${createHash("sha256").update(name).digest("hex")}`);
     }
   });
 

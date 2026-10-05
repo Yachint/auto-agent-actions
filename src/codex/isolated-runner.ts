@@ -36,6 +36,7 @@ export async function runIsolatedReview(
   const proxy = await createModelProxy({
     model: options.model,
     timeoutMs: options.timeoutMs,
+    ...(options.onUsage === undefined ? {} : { onUsage: options.onUsage }),
     ...credentials,
   });
   try {
@@ -79,8 +80,11 @@ export async function runIsolatedReview(
     });
     await rm(bundle);
     const privateOutput = path.join(root, "review.json");
-    return await runCodexReview({
-      ...options,
+    // The proxy accounts for every model response, including delegated threads.
+    // Do not also count the CLI's aggregate usage events.
+    const { onUsage: _onUsage, ...runnerOptions } = options;
+    const output = await runCodexReview({
+      ...runnerOptions,
       worktreePath: snapshot,
       outputPath: privateOutput,
       environment: {
@@ -108,6 +112,9 @@ export async function runIsolatedReview(
         );
         return executeProcess({
           ...invocation,
+          signal: invocation.signal === undefined
+            ? proxy.signal
+            : AbortSignal.any([invocation.signal, proxy.signal]),
           command: options.sandboxBinary,
           args: [
             "--connect-port",
@@ -147,7 +154,10 @@ export async function runIsolatedReview(
         });
       },
     });
+    if (proxy.usageLimit()) throw proxy.usageLimit();
+    return output;
   } catch (error) {
+    if (proxy.usageLimit()) throw proxy.usageLimit();
     if (proxy.authenticationFailed()) throw new ModelAuthenticationError();
     throw error;
   } finally {

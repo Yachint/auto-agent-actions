@@ -1,3 +1,5 @@
+import { modelLimitFromResponse, type ModelUsageLimitError } from "./model-limit.js";
+
 export interface CodexUsage {
   readonly inputTokens: number;
   readonly cachedInputTokens: number;
@@ -9,6 +11,7 @@ export class UsageCollector {
   #buffer = "";
   #dropping = false;
   #totals = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  #limit: ModelUsageLimitError | undefined;
   push(chunk: Buffer): void {
     for (const part of chunk.toString("utf8").split(/(?<=\n)/)) {
       if (!this.#dropping) this.#buffer += part;
@@ -25,12 +28,20 @@ export class UsageCollector {
   totals(): CodexUsage {
     return { ...this.#totals };
   }
+  limit(): ModelUsageLimitError | undefined {
+    return this.#limit;
+  }
   #read(line: string): void {
     try {
       const value = JSON.parse(line) as {
         type?: string;
         usage?: Record<string, unknown>;
       };
+      if (value.type === "turn.failed" || value.type === "error") {
+        const limit = modelLimitFromResponse(value);
+        if (limit && (!this.#limit || limit.retryAt > this.#limit.retryAt))
+          this.#limit = limit;
+      }
       if (value.type !== "turn.completed" || !value.usage) return;
       for (const [target, source] of [
         ["inputTokens", "input_tokens"],

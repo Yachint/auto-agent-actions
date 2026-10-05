@@ -1,6 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
+import type { CodexUsage } from "./usage.js";
+import { modelLimitFromResponse, type ModelUsageLimitError } from "./model-limit.js";
+import { ModelResponseObserver } from "./model-response.js";
 
 export interface ModelProxyOptions {
   readonly model: string;
@@ -9,6 +12,7 @@ export interface ModelProxyOptions {
   readonly accountId?: string;
   readonly timeoutMs: number;
   readonly fetch?: typeof globalThis.fetch;
+  readonly onUsage?: (usage: CodexUsage) => void;
 }
 
 /** Per-job, loopback-only capability. No GitHub, OAuth-refresh or generic URL forwarding. */
@@ -23,6 +27,12 @@ export async function createModelProxy(options: ModelProxyOptions) {
   const expires = Date.now() + options.timeoutMs;
   let requests = 0;
   let authenticationFailed = false;
+  let usageLimit: ModelUsageLimitError | undefined;
+  const limited = new AbortController();
+  const observeLimit = (error: ModelUsageLimitError) => {
+    if (!usageLimit || error.retryAt > usageLimit.retryAt) usageLimit = error;
+    limited.abort();
+  };
   const active = new Set<AbortController>();
   const server = createServer(async (request, response) => {
     const provided = Buffer.from(request.headers.authorization ?? "");
@@ -32,6 +42,13 @@ export async function createModelProxy(options: ModelProxyOptions) {
       !timingSafeEqual(provided, expected)
     ) {
       response.writeHead(401).end();
+      return;
+    }
+    if (usageLimit) {
+      response.writeHead(429, {
+        "Retry-After": String(Math.max(1,
+          Math.ceil((usageLimit.retryAt - Date.now()) / 1000))),
+      }).end();
       return;
     }
     if (
@@ -89,17 +106,40 @@ export async function createModelProxy(options: ModelProxyOptions) {
       });
       if (upstream.status === 401 || upstream.status === 403)
         authenticationFailed = true;
+      const retryAfter = upstream.headers.get("retry-after");
+      const observer = new ModelResponseObserver(
+        options.onUsage, observeLimit, upstream.status, retryAfter,
+      );
       response.writeHead(upstream.status, {
         "Content-Type":
           upstream.headers.get("content-type") ?? "application/json",
       });
-      if (upstream.body !== null)
+      if (upstream.body !== null) {
+        const observed = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            observer.push(chunk);
+            callback(null, chunk);
+          },
+          flush(callback) {
+            observer.finish();
+            // A malformed/empty 429 is still a backoff signal.
+            if (upstream.status === 429 && !usageLimit)
+              observeLimit(modelLimitFromResponse(undefined, 429, retryAfter)!);
+            callback();
+          },
+        });
         Readable.fromWeb(
           upstream.body as import("node:stream/web").ReadableStream,
         )
           .on("error", () => response.destroy())
+          .pipe(observed)
+          .on("error", () => response.destroy())
           .pipe(response);
-      else response.end();
+      } else {
+        if (upstream.status === 429)
+          observeLimit(modelLimitFromResponse(undefined, 429, retryAfter)!);
+        response.end();
+      }
     } catch {
       if (!response.headersSent) response.writeHead(502);
       response.end();
@@ -116,6 +156,8 @@ export async function createModelProxy(options: ModelProxyOptions) {
     throw new Error("model proxy did not bind");
   return {
     authenticationFailed: () => authenticationFailed,
+    usageLimit: () => usageLimit,
+    signal: limited.signal,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     token,
     close: async () => {

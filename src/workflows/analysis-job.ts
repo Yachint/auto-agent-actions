@@ -36,6 +36,7 @@ export interface AnalysisJobOptions {
   readonly sandboxBinary?: string;
   readonly verifyFindings?: boolean;
   readonly adaptiveEffort?: boolean;
+  readonly agentThreads?: 1 | 2 | 3;
 }
 
 export interface AnalysisJobDependencies {
@@ -215,6 +216,7 @@ export class AnalysisJobProcessor {
 
       const result = await (this.#dependencies.runReview ?? runReviewCore)({
         signal: controller.signal,
+        ...(this.#options.agentThreads === undefined ? {} : { agentThreads: this.#options.agentThreads }),
         ...(this.#options.verifyFindings === undefined
           ? {}
           : { verifyFindings: this.#options.verifyFindings }),

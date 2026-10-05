@@ -1,6 +1,8 @@
 import { verifyIsolationPolicy } from "./codex/isolation-preflight.js";
 import { statfs, mkdir } from "node:fs/promises";
 import { ModelAuthenticationError } from "./codex/model-proxy.js";
+import { ModelCooldownStore } from "./queue/model-cooldown.js";
+import { runWithModelCooldown } from "./workflows/model-cooldown.js";
 import { startWorkerHeartbeat } from "./observability/worker-health.js";
 import { GitHubApiError } from "./github/client.js";
 import { reviewPolicyHash } from "./queue/policy.js";
@@ -74,6 +76,7 @@ const processor = new AnalysisJobProcessor(
     model: config.model,
     verifyFindings: config.verifyFindings,
     adaptiveEffort: config.adaptiveEffort,
+    agentThreads: config.agentThreads,
     reasoningEffort: config.reasoningEffort,
     timeoutMs: config.timeoutMs,
     schemaPath: config.schemaPath,
@@ -106,7 +109,9 @@ const processor = new AnalysisJobProcessor(
   },
 );
 let authenticationBlockedUntil = 0;
-const worker = new Worker<ReviewRequest, string, "review">(
+const modelCooldown = new ModelCooldownStore(redis, config.reviewQueueName);
+let modelBlockedUntil = Date.now() + await modelCooldown.remainingMs();
+const worker: Worker<ReviewRequest, string, "review"> = new Worker(
   config.reviewQueueName,
   async (job) => {
     const startedAt = Date.now();
@@ -125,7 +130,23 @@ const worker = new Worker<ReviewRequest, string, "review">(
         await worker.rateLimit(60_000);
         throw Worker.RateLimitError();
       }
-      const result = await processor.process(job.data);
+      const result = await runWithModelCooldown(() => processor.process(job.data), {
+        store: modelCooldown,
+        rateLimit: (delayMs) => worker.rateLimit(delayMs),
+        onBlocked: async (delayMs, newlyLimited) => {
+          modelBlockedUntil = Date.now() + delayMs;
+          if (!newlyLimited) return;
+          await recordMetric("analysis_model_usage_limited_total");
+          logger.warn(
+            {
+              jobId: job.id,
+              errorName: "ModelUsageLimitError",
+              retryAt: new Date(modelBlockedUntil).toISOString(),
+            },
+            "model usage limit reached; analysis deferred without a failure notification",
+          );
+        },
+      });
       await recordMetric(`analysis_${result.replaceAll("-", "_")}_total`);
       return result;
     } catch (error) {
@@ -159,6 +180,17 @@ const worker = new Worker<ReviewRequest, string, "review">(
         throw Worker.RateLimitError();
       }
       await recordMetric("analysis_failed_total");
+      logger.warn(
+        {
+          jobId: job.id,
+          errorName: failure instanceof Error ? failure.name : "unknown",
+          failureCode: classifyFailure(failure),
+          ...(failure instanceof CodexExecutionError
+            ? { exitCode: failure.exitCode, signal: failure.signal, failureKind: failure.failureKind }
+            : {}),
+        },
+        "analysis attempt failed",
+      );
       if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
         await publicationQueue
           .enqueueFailure({
@@ -229,7 +261,8 @@ const stopHeartbeat = startWorkerHeartbeat(
   redis,
   "analysis",
   () =>
-    !closing && !worker.isPaused() && Date.now() >= authenticationBlockedUntil,
+    !closing && !worker.isPaused() &&
+    Date.now() >= Math.max(authenticationBlockedUntil, modelBlockedUntil),
 );
 
 worker.on("completed", (job, result) => {

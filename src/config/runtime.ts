@@ -40,6 +40,7 @@ export interface AnalysisWorkerConfig extends QueueRuntimeConfig {
   readonly sandboxBinary?: string;
   readonly verifyFindings: boolean;
   readonly adaptiveEffort: boolean;
+  readonly agentThreads: 1 | 2 | 3;
 }
 
 export interface PublisherWorkerConfig extends QueueRuntimeConfig {
@@ -120,6 +121,7 @@ export async function loadAnalysisWorkerConfig(
   const common = await loadQueueRuntimeConfig(source);
   return {
     ...common,
+    agentThreads: loadReviewAgentThreads(source),
     concurrency: positiveInteger(
       source.REVIEW_WORKER_CONCURRENCY ?? "1",
       "REVIEW_WORKER_CONCURRENCY",
@@ -164,6 +166,14 @@ export async function loadAnalysisWorkerConfig(
       30 * 24 * 60 * 60 * 1_000,
     ),
   };
+}
+
+export function loadReviewAgentThreads(
+  source: NodeJS.ProcessEnv = process.env,
+): 1 | 2 | 3 {
+  return positiveInteger(
+    source.CODEX_AGENT_THREADS ?? "1", "CODEX_AGENT_THREADS", 3,
+  ) as 1 | 2 | 3;
 }
 
 export async function loadPublisherWorkerConfig(

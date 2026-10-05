@@ -216,6 +216,14 @@ This file is the durable, chronological handoff for future development sessions.
 - Shared isolation configuration now reaches local/evaluation execution and normalizes actual isolation in policy hashes; evaluation reports record effective isolation and the fixed execution timeout. Added REST-adapter recovery, marker ownership, App JWT, local isolation parity and real Redis journal persistence regressions.
 - Final Astra High re-review found no remaining blockers in these fixes. Validation passed: TypeScript build and all 188 tests on Node 24, including real Redis, Unix sockets and native isolation; both Docker runtime builds and the isolated Codex 0.155.1 synthetic canary; dependency audit found zero vulnerabilities. The owner explicitly authorized committing and pushing these changes; VPS deployment and live App/model acceptance remain separate.
 
+## 2026-10-06 — Usage-limit recovery and review resource ceilings
+
+- Investigated the incident reported in `Yachint/agenda#17` against the deployed `c9c2bdc` pipeline. Usage exhaustion had no distinct backoff path; adaptive effort could raise effort to xhigh and the runner default allowed three agent threads. The Agenda checkout was not modified.
+- Added safe structured quota/throttling classification, reset/Retry-After handling, a queue-wide Redis cooldown that concurrent failures cannot shorten, and BullMQ rate-limit deferrals. Cooldown jobs remain pending without retry consumption or terminal failure notifications, including after worker restart or reconciliation.
+- Isolated reviews count bounded per-response upstream usage before later failures, including delegated calls, and avoid duplicate CLI accounting. Missing/oversized upstream usage events remain unobservable. Logs expose safe root-cause names/codes and cooldown timestamps without raw model content or credentials.
+- `CODEX_AGENT_THREADS=1` now disables delegation by default; explicit ceilings up to three remain available and enter shared policy identity. Adaptive effort only reduces configured effort/thread ceilings. Owner-selected model/high-effort defaults remain. The owner authorized medium effort with one agent and adaptive effort for this deployment, plus commit/push, server pull/restart and pending-job verification.
+- Local verification passed TypeScript build/static asset copying and 197 standard tests; seven optional Redis/socket/Linux isolation tests were skipped. No packages were installed, no live model calls were made, and the VPS analysis worker remains stopped. Deployment and resource-setting changes require explicit owner authorization.
+
 ## Unresolved decisions
 
 - Redis backup/restore rehearsal remains required for disaster-recovery confidence.

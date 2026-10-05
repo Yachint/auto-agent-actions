@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -75,9 +76,9 @@ describe("Codex review runner", () => {
     expect(capturedInvocation?.args).toContain('approval_policy="never"');
     expect(capturedInvocation?.args).toContain('web_search="disabled"');
     expect(capturedInvocation?.args).toContain("features.apps=false");
-    expect(capturedInvocation?.args).toContain("agents.enabled=true");
+    expect(capturedInvocation?.args).toContain("agents.enabled=false");
     expect(capturedInvocation?.args).toContain(
-      "agents.max_concurrent_threads_per_session=3",
+      "agents.max_concurrent_threads_per_session=1",
     );
     expect(capturedInvocation?.args).toContain("agents.max_depth=1");
     expect(capturedInvocation?.args).toContain('model_reasoning_effort="high"');
@@ -327,6 +328,7 @@ describe("Codex review runner", () => {
       outputPath: "/trusted/review-output.json",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
+      agentThreads: 3,
     });
 
     expect(args).toContain("features.use_legacy_landlock=true");
@@ -340,12 +342,30 @@ describe("Codex review runner", () => {
       outputPath: "/trusted/review-output.json",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
+      agentThreads: 3,
     });
 
     expect(args).toContain("--ignore-user-config");
     expect(args).toContain("agents.enabled=true");
     expect(args).toContain("agents.max_concurrent_threads_per_session=3");
     expect(args).toContain("agents.max_depth=1");
+  });
+
+  it("reports available usage even when Codex fails at its usage limit", async () => {
+    const fixture = await createFixture();
+    const usage = { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20 };
+    const limit = new ModelUsageLimitError(Date.now() + 18_000_000);
+    const recorded: unknown[] = [];
+    await expect(runCodexReview({
+      ...fixture,
+      model: "gpt-6.1-sol",
+      reasoningEffort: "high",
+      prompt: "Trusted prompt",
+      timeoutMs: 1000,
+      onUsage: (value) => recorded.push(value),
+      executor: async () => ({ ...successfulResult(), exitCode: 1, usage, modelLimit: limit }),
+    })).rejects.toBe(limit);
+    expect(recorded).toEqual([usage]);
   });
 
   it("requires trusted artifacts and output to be outside the worktree", async () => {

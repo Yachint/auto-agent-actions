@@ -1,4 +1,4 @@
-import { loadReviewIsolationConfig } from "../config/runtime.js";
+import { loadReviewIsolationConfig, loadReviewAgentThreads } from "../config/runtime.js";
 import { buildReviewPrompt } from "../codex/prompt.js";
 import { buildCodexArgs } from "../codex/runner.js";
 import { createHash } from "node:crypto";
@@ -30,6 +30,7 @@ export function reviewPolicyHash(
           outputPath: "/result",
           model: environment.CODEX_MODEL ?? "gpt-6.1-sol",
           reasoningEffort: "high",
+          agentThreads: loadReviewAgentThreads(environment),
         }),
         environment.REVIEW_FINDING_CONTINUITY ?? "false",
         environment.REVIEW_PUBLISH_SUMMARY_WITHOUT_FINDINGS ?? "true",
