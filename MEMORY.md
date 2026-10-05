@@ -224,6 +224,8 @@ This file is the durable, chronological handoff for future development sessions.
 - `CODEX_AGENT_THREADS=1` now disables delegation by default; explicit ceilings up to three remain available and enter shared policy identity. Adaptive effort only reduces configured effort/thread ceilings. Owner-selected model/high-effort defaults remain. The owner authorized medium effort with one agent and adaptive effort for this deployment, plus commit/push, server pull/restart and pending-job verification.
 - Local verification passed TypeScript build/static asset copying and 197 standard tests; seven optional Redis/socket/Linux isolation tests were skipped. No packages were installed, no live model calls were made, and the VPS analysis worker remains stopped. Deployment and resource-setting changes require explicit owner authorization.
 
+- Authorized deployment of `d86c666` passed image/sandbox preflights, a synthetic single-agent Git canary, and live Redis cooldown checks. The first current-head review was blocked without hitting quota. Added safe model-blocked versus coverage-incomplete diagnostics and clarified that disabled delegation is not a review blocker; 198 standard tests pass before the follow-up deployment.
+
 ## Unresolved decisions
 
 - Redis backup/restore rehearsal remains required for disaster-recovery confidence.

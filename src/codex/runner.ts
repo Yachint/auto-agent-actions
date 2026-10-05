@@ -79,6 +79,8 @@ export class CodexExecutionError extends Error {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   failureKind?: "blocked" | "timeout";
+  failureReason?: "coverage-incomplete" | "model-blocked";
+  blockedCapabilities?: string[];
 
   constructor(
     message: string,
@@ -156,8 +158,7 @@ export async function runCodexReview(
   } catch {
     throw new CodexExecutionError("Codex returned invalid review JSON");
   }
-  if (options.expectedPaths !== undefined)
-    validateCoverage(raw, options.expectedPaths);
+  const coverageOutput = raw;
   if (
     typeof raw === "object" &&
     raw !== null &&
@@ -173,8 +174,19 @@ export async function runCodexReview(
       "Codex could not complete the requested review",
     );
     error.failureKind = "blocked";
+    error.failureReason = "model-blocked";
+    error.blockedCapabilities = [
+      ["sandbox", /sandbox|permission|namespace|landlock|bubblewrap|bwrap/i],
+      ["git", /\bgit\b|commit|history|diff/i],
+      ["delegation", /subagent|delegate|delegation|spawn/i],
+      ["context", /context|token|too large|size limit/i],
+      ["tooling", /tool|exec|command/i],
+    ].filter(([, pattern]) => (pattern as RegExp).test(output.blocked_reason))
+      .map(([name]) => name as string);
     throw error;
   }
+  if (options.expectedPaths !== undefined)
+    validateCoverage(coverageOutput, options.expectedPaths);
   return output;
 }
 
@@ -517,6 +529,7 @@ function validateCoverage(value: unknown, paths: readonly string[]): void {
       "Codex did not inspect every required component",
     );
     error.failureKind = "blocked";
+    error.failureReason = "coverage-incomplete";
     throw error;
   };
   if (typeof value !== "object" || value === null || Array.isArray(value))

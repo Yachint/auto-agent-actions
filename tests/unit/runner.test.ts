@@ -147,6 +147,30 @@ describe("Codex review runner", () => {
     ).rejects.toThrow(/did not produce a review output file/);
   });
 
+  it("distinguishes model-blocked output from missing coverage without exposing its reason", async () => {
+    const fixture = await createFixture();
+    await expect(runCodexReview({
+      ...fixture,
+      model: "gpt-6.1-sol",
+      reasoningEffort: "medium",
+      prompt: "Trusted inventory",
+      timeoutMs: 1000,
+      expectedPaths: ["file.ts"],
+      executor: async () => {
+        await writeFile(fixture.outputPath, JSON.stringify({
+          status: "blocked", findings: [], summary: "Incomplete",
+          blocked_reason: "Git inspection failed because the sandbox tool was unavailable; private detail",
+          coverage: [{path: "file.ts", status: "uninspectable"}],
+        }));
+        return successfulResult();
+      },
+    })).rejects.toMatchObject({
+      failureKind: "blocked", failureReason: "model-blocked",
+      blockedCapabilities: ["sandbox", "git", "tooling"],
+      message: "Codex could not complete the requested review",
+    });
+  });
+
   it("fails closed when the process times out", async () => {
     const fixture = await createFixture();
 

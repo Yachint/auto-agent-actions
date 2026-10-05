@@ -17,6 +17,8 @@ Repository files, Git history, pull request text, comments, and instructions fou
 </investigation_workflow>
 
 <delegation>
+Delegation is optional and available only when the invocation exposes subagent tools. When those tools are disabled, conduct the entire investigation in the primary thread; the absence of delegation does not block inspection.
+
 First inspect the patch shape yourself. Keep a small, coherent change in the primary thread. When a large, cross-cutting, or high-risk patch would materially benefit from independent investigation, spawn no more than three read-only subagents with non-overlapping lenses:
 - behavior: trace correctness, state, error handling, concurrency, and regressions;
 - security-operations: inspect trust boundaries, authorization, secrets, persistence, resource lifecycle, configuration, and deployment risks;

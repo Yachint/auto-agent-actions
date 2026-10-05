@@ -186,7 +186,13 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
           errorName: failure instanceof Error ? failure.name : "unknown",
           failureCode: classifyFailure(failure),
           ...(failure instanceof CodexExecutionError
-            ? { exitCode: failure.exitCode, signal: failure.signal, failureKind: failure.failureKind }
+            ? {
+                exitCode: failure.exitCode,
+                signal: failure.signal,
+                failureKind: failure.failureKind,
+                failureReason: failure.failureReason,
+                blockedCapabilities: failure.blockedCapabilities,
+              }
             : {}),
         },
         "analysis attempt failed",
