@@ -1,6 +1,6 @@
 import { verifyIsolationPolicy } from "./codex/isolation-preflight.js";
 import { statfs, mkdir } from "node:fs/promises";
-import { ModelAuthenticationError } from "./codex/model-proxy.js";
+import { ModelAuthenticationError, ModelProxyPolicyError } from "./codex/model-proxy.js";
 import { ModelCooldownStore } from "./queue/model-cooldown.js";
 import { runWithModelCooldown } from "./workflows/model-cooldown.js";
 import { startWorkerHeartbeat } from "./observability/worker-health.js";
@@ -194,13 +194,19 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
                 blockedCapabilities: failure.blockedCapabilities,
                 blockedKeywords: failure.blockedKeywords,
                 toolFailures: failure.toolFailures,
+                proxyDiagnostics: failure.proxyDiagnostics,
               }
             : {}),
+          ...(failure instanceof ModelProxyPolicyError ? {
+            proxyFailureReason: failure.reason,
+            proxyDiagnostics: failure.diagnostics,
+          } : {}),
         },
         "analysis attempt failed",
       );
       const inspectionBlocked =
-        failure instanceof CodexExecutionError && failure.failureKind === "blocked";
+        (failure instanceof CodexExecutionError && failure.failureKind === "blocked") ||
+        failure instanceof ModelProxyPolicyError;
       if (inspectionBlocked) job.discard();
       if (inspectionBlocked || job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
         await stateStore.exhaustAnalysis(
@@ -247,6 +253,7 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
 );
 
 function classifyFailure(error: unknown): AnalysisFailureCode {
+  if (error instanceof ModelProxyPolicyError) return "inspection-blocked";
   if (error instanceof StaleReviewRefError) {
     return error.refName === "base" ? "base-ref-changed" : "head-ref-changed";
   }

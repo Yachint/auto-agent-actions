@@ -1,5 +1,6 @@
 import { UsageCollector, type CodexUsage, type ToolFailureDiagnostics } from "./usage.js";
 import type { ModelUsageLimitError } from "./model-limit.js";
+import type { ModelProxyDiagnostics } from "./model-proxy.js";
 import { spawn } from "node:child_process";
 import { readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -84,6 +85,7 @@ export class CodexExecutionError extends Error {
   failureReason?: "coverage-incomplete" | "model-blocked";
   blockedCapabilities?: string[];
   blockedKeywords?: string[];
+  proxyDiagnostics?: ModelProxyDiagnostics;
 
   constructor(
     message: string,
@@ -198,9 +200,15 @@ export async function runCodexReview(
       "directory", "ownership", "dubious", "lock", "read", "inspect", "inspection",
       "cannot", "could", "not", "unable", "because", "no", "required", "errors",
       "binary", "deleted", "missing", "partial", "responses", "returned", "status",
+      "incomplete", "completion", "completed", "results", "full", "limits",
+      "execution", "reliable", "uninspectable", "process", "access", "provided",
+      "real", "actual", "placeholder", "synthetic", "simulated", "error",
+      "information", "insufficient", "budget", "tokens", "available", "retry",
+      "response", "fetch", "memory", "terminal", "blocked", "large", "files",
+      "repeated", "malformed", "policy", "remaining", "entire", "whole",
     ]);
     error.blockedKeywords = output.blocked_reason.toLowerCase().split(/[^a-z]+/)
-      .filter((word) => words.has(word)).slice(0, 40);
+      .filter((word) => words.has(word)).slice(0, 80);
     throw error;
   }
   if (options.expectedPaths !== undefined)

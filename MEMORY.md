@@ -230,6 +230,8 @@ This file is the durable, chronological handoff for future development sessions.
 
 - The owner stopped production containers after usage continued draining. Found and fixed a second retry loop: reconciliation deleted failed analysis jobs and reset their attempt allowance. Terminal analysis now records an owner-fenced Redis exhaustion gate checked by both scheduling and execution; retained failures from older workers are preserved, while missing-job scheduling repair and explicit re-review remain available. Blocked inspection is terminal on its first attempt. TypeScript build and 203 standard tests pass (eight optional tests skipped). Containers stay stopped during investigation; renewed Tailscale SSH authentication is required to read the final live failure diagnostics.
 
+- SSH access was restored and the owner reauthorized promotion/restart and monitoring. Live Redis acceptance verified exhaustion persistence across reconciliation, store recreation and job-retention loss. A bounded real-model exact-scope Git canary passed in two requests (7,001 input and 296 output tokens), without publication. Added safe numeric proxy/tool diagnostics and immediate non-retrying proxy size/count/expiry failures, plus explicit bounded native-tool guidance; build and 207 standard tests pass (eight optional tests skipped). The desktop usage meter was verified to refer to the service account; full-review acceptance will pause analysis at 35% of the five-hour window.
+
 ## Unresolved decisions
 
 - Redis backup/restore rehearsal remains required for disaster-recovery confidence.

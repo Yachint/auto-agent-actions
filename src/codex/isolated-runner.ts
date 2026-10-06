@@ -12,6 +12,7 @@ import { createGitExecutor } from "../repositories/git.js";
 import { createModelProxy, ModelAuthenticationError } from "./model-proxy.js";
 import {
   executeProcess,
+  CodexExecutionError,
   runCodexReview,
   type CodexRunnerOptions,
 } from "./runner.js";
@@ -155,10 +156,13 @@ export async function runIsolatedReview(
       },
     });
     if (proxy.usageLimit()) throw proxy.usageLimit();
+    if (proxy.policyFailure()) throw proxy.policyFailure();
     return output;
   } catch (error) {
     if (proxy.usageLimit()) throw proxy.usageLimit();
+    if (proxy.policyFailure()) throw proxy.policyFailure();
     if (proxy.authenticationFailed()) throw new ModelAuthenticationError();
+    if (error instanceof CodexExecutionError) error.proxyDiagnostics = proxy.diagnostics();
     throw error;
   } finally {
     await proxy.close();
