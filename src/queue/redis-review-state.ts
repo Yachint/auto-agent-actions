@@ -26,6 +26,7 @@ const ENQUEUE_FAILED_COMMAND = "autoAgentReviewEnqueueFailed";
 const CAN_PUBLISH_COMMAND = "autoAgentCanPublishReview";
 const COMPLETE_COMMAND = "autoAgentCompleteReview";
 const FAIL_COMMAND = "autoAgentFailReview";
+const EXHAUST_COMMAND = "autoAgentExhaustAnalysis";
 
 export class RedisReviewStateStore implements ReviewStateStore {
   readonly #redis: RedisScriptClient;
@@ -66,6 +67,20 @@ export class RedisReviewStateStore implements ReviewStateStore {
       lua: COMPLETE_SCRIPT,
     });
     redis.defineCommand(FAIL_COMMAND, { numberOfKeys: 1, lua: FAIL_SCRIPT });
+    redis.defineCommand(EXHAUST_COMMAND, { numberOfKeys: 1, lua: EXHAUST_SCRIPT });
+  }
+
+  async exhaustAnalysis(
+    repository: string,
+    pullRequestNumber: number,
+    headSha: string,
+    attemptId?: string,
+  ): Promise<boolean> {
+    validate(repository, pullRequestNumber, headSha);
+    return this.#booleanResult(
+      EXHAUST_COMMAND, repository, pullRequestNumber,
+      headSha.toLowerCase(), attemptId,
+    );
   }
 
   async recordRequested(
@@ -273,6 +288,9 @@ export class RedisReviewStateStore implements ReviewStateStore {
       ...(values.scheduling_request
         ? { schedulingRequest: values.scheduling_request }
         : {}),
+      ...(values.analysis_exhausted_scope
+        ? { analysisExhaustedScope: requireSha(values.analysis_exhausted_scope) }
+        : {}),
       ...(values.attempt_id ? { attemptId: values.attempt_id } : {}),
       ...(values.publication_artifact
         ? { publicationArtifact: values.publication_artifact }
@@ -305,6 +323,7 @@ export class RedisReviewStateStore implements ReviewStateStore {
 }
 
 const REQUEST_SCRIPT = `
+if redis.call('HGET', KEYS[1], 'analysis_exhausted_scope') == ARGV[3] then return 0 end
 local latest = redis.call('HGET', KEYS[1], 'latest_requested_head_sha')
 local status = redis.call('HGET', KEYS[1], 'status')
 if latest == ARGV[3] and status ~= 'failed' then return 0 end
@@ -321,6 +340,7 @@ redis.call('HSET', KEYS[1],
 return 1`;
 
 const START_SCRIPT = `
+if redis.call('HGET', KEYS[1], 'analysis_exhausted_scope') == ARGV[3] then return 0 end
 local latest = redis.call('HGET', KEYS[1], 'latest_requested_head_sha')
 if latest ~= ARGV[3] then return 0 end
 local reviewed = redis.call('HGET', KEYS[1], 'last_reviewed_head_sha')
@@ -333,6 +353,15 @@ redis.call('HSET', KEYS[1],
   'currently_running_head_sha', ARGV[3],
   'status', 'running',
   'updated_at', ARGV[4])
+return 1`;
+
+const EXHAUST_SCRIPT = `
+if redis.call('HGET', KEYS[1], 'latest_requested_head_sha') ~= ARGV[3] then return 0 end
+if ARGV[5] ~= '' and redis.call('HGET', KEYS[1], 'attempt_id') ~= ARGV[5] then return 0 end
+local status = redis.call('HGET', KEYS[1], 'status')
+if status == 'reviewed' or status == 'publishing' then return 0 end
+redis.call('HSET', KEYS[1], 'analysis_exhausted_scope', ARGV[3], 'status', 'failed', 'updated_at', ARGV[4])
+redis.call('HDEL', KEYS[1], 'currently_running_head_sha')
 return 1`;
 
 const ENQUEUE_FAILED_SCRIPT = `

@@ -30,6 +30,25 @@ const request = {
 };
 
 describe.skipIf(!enabled)("real Redis/BullMQ pipeline recovery", () => {
+  it("persists exhausted scope gates across Redis store recreation and queue retention", async () => {
+    const pr = 2;
+    const key = reviewStateRedisKey(repository, pr);
+    try {
+      await state.recordRequested(repository, pr, head);
+      await state.tryStart(repository, pr, head, "old");
+      await state.fail(repository, pr, head, "old");
+      await state.tryStart(repository, pr, head, "new");
+      expect(await state.exhaustAnalysis(repository, pr, head, "old")).toBe(false);
+      await state.fail(repository, pr, head, "new");
+      expect(await state.exhaustAnalysis(repository, pr, head, "new")).toBe(true);
+      const restarted = new RedisReviewStateStore(createIORedisClient(redis));
+      expect((await restarted.get(repository, pr))?.analysisExhaustedScope).toBe(head);
+      expect(await restarted.recordRequested(repository, pr, head)).toBe(false);
+      expect(await restarted.tryStart(repository, pr, head, "late")).toBe(false);
+      await restarted.recordRequested(repository, pr, next);
+      expect(await restarted.tryStart(repository, pr, next, "fresh")).toBe(true);
+    } finally { await redis.del(key); }
+  });
   beforeAll(async () => {
     const url = process.env.AAA_TEST_REDIS_URL;
     if (!url || !["127.0.0.1", "localhost"].includes(new URL(url).hostname))

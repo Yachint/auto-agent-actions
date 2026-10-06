@@ -20,7 +20,7 @@ import { RedisOperationalMetrics } from "./observability/metrics.js";
 import { BullMqPublicationQueue } from "./queue/publication-queue.js";
 import type { AnalysisFailureCode } from "./queue/publication-queue.js";
 import { BullMqReviewQueue } from "./queue/bullmq-review-queue.js";
-import type { ReviewRequest } from "./queue/review-queue.js";
+import { reviewScope, type ReviewRequest } from "./queue/review-queue.js";
 import { RedisReviewStateStore } from "./queue/redis-review-state.js";
 import { RepositoryManager } from "./repositories/manager.js";
 import { StaleReviewRefError } from "./repositories/manager.js";
@@ -199,7 +199,15 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
         },
         "analysis attempt failed",
       );
-      if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
+      const inspectionBlocked =
+        failure instanceof CodexExecutionError && failure.failureKind === "blocked";
+      if (inspectionBlocked) job.discard();
+      if (inspectionBlocked || job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
+        await stateStore.exhaustAnalysis(
+          job.data.repository, job.data.pullRequestNumber,
+          reviewScope(job.data),
+          error instanceof AnalysisAttemptError ? error.attemptId : undefined,
+        );
         await publicationQueue
           .enqueueFailure({
             reviewRequest: job.data,

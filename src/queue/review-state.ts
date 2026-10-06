@@ -18,6 +18,7 @@ export interface ReviewState {
   readonly publicationArtifact?: string;
   readonly attemptId?: string;
   readonly schedulingRequest?: string;
+  readonly analysisExhaustedScope?: string;
   readonly lastPublication?: {
     readonly scopeSha: string;
     readonly reviewId: number;
@@ -25,6 +26,12 @@ export interface ReviewState {
 }
 
 export interface ReviewStateStore {
+  exhaustAnalysis(
+    repository: string,
+    pullRequestNumber: number,
+    headSha: string,
+    attemptId?: string,
+  ): Promise<boolean>;
   recordRequested(
     repository: string,
     pullRequestNumber: number,
@@ -111,6 +118,7 @@ export class InMemoryReviewStateStore implements ReviewStateStore {
     validateIdentity(repository, pullRequestNumber, headSha);
     const key = reviewConcurrencyKey(repository, pullRequestNumber);
     const previous = this.#states.get(key);
+    if (previous?.analysisExhaustedScope === headSha.toLowerCase()) return false;
     if (
       previous?.latestRequestedHeadSha === headSha.toLowerCase() &&
       previous.status !== "failed"
@@ -124,6 +132,9 @@ export class InMemoryReviewStateStore implements ReviewStateStore {
         ? {}
         : { lastPublication: previous.lastPublication }),
       ...(schedulingRequest === undefined ? {} : { schedulingRequest }),
+      ...(previous?.analysisExhaustedScope === undefined
+        ? {}
+        : { analysisExhaustedScope: previous.analysisExhaustedScope }),
       latestRequestedHeadSha: headSha.toLowerCase(),
       currentlyRunningHeadSha: null,
       lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? null,
@@ -143,6 +154,7 @@ export class InMemoryReviewStateStore implements ReviewStateStore {
     const normalizedHead = headSha.toLowerCase();
     if (
       state.latestRequestedHeadSha !== normalizedHead ||
+      state.analysisExhaustedScope === normalizedHead ||
       state.status === "publishing" ||
       (state.lastReviewedHeadSha === normalizedHead &&
         state.status === "reviewed") ||
@@ -169,6 +181,28 @@ export class InMemoryReviewStateStore implements ReviewStateStore {
       throw new TypeError("invalid review receipt");
     if (state.latestRequestedHeadSha === headSha)
       this.#set(state, { lastPublication: { scopeSha: headSha, reviewId } });
+  }
+
+  async exhaustAnalysis(
+    repository: string,
+    pullRequestNumber: number,
+    headSha: string,
+    attemptId?: string,
+  ): Promise<boolean> {
+    const state = this.#requireState(repository, pullRequestNumber, headSha);
+    const scope = headSha.toLowerCase();
+    if (
+      state.latestRequestedHeadSha !== scope ||
+      (attemptId !== undefined && state.attemptId !== attemptId) ||
+      state.status === "reviewed" ||
+      state.status === "publishing"
+    ) return false;
+    this.#set(state, {
+      analysisExhaustedScope: scope,
+      currentlyRunningHeadSha: null,
+      status: "failed",
+    });
+    return true;
   }
 
   async recoverExpired(

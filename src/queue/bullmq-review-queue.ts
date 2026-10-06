@@ -99,6 +99,22 @@ export class BullMqReviewQueue implements ReviewQueue {
               )
               .digest("hex"),
           };
+    const jobId = createHash("sha256")
+      .update(
+        `${request.repository}#${request.pullRequestNumber}#${reviewScope(request)}`,
+      )
+      .digest("hex");
+    if (previous?.analysisExhaustedScope === reviewScope(request)) return;
+    // Retained terminal jobs from older workers also consume the scope's retry
+    // allowance. Reconciliation must not delete them and reset attempts to zero.
+    const existing = await this.#queue.getJob?.(jobId);
+    if (existing !== undefined && (await existing.getState()) === "failed") {
+      await this.#stateStore.exhaustAnalysis(
+        request.repository, request.pullRequestNumber,
+        reviewScope(request), previous?.attemptId,
+      );
+      return;
+    }
     const shouldQueue = await this.#stateStore.recordRequested(
       request.repository,
       request.pullRequestNumber,
@@ -114,6 +130,7 @@ export class BullMqReviewQueue implements ReviewQueue {
       if (
         state === null ||
         state.latestRequestedHeadSha !== reviewScope(request) ||
+        state.analysisExhaustedScope === reviewScope(request) ||
         state.status === "reviewed"
       )
         return;
@@ -135,15 +152,19 @@ export class BullMqReviewQueue implements ReviewQueue {
         return;
     }
 
-    const jobId = createHash("sha256")
-      .update(
-        `${request.repository}#${request.pullRequestNumber}#${reviewScope(request)}`,
-      )
-      .digest("hex");
-    const existing = await this.#queue.getJob?.(jobId);
     if (existing !== undefined) {
       const jobState = await existing.getState();
-      if (jobState !== "failed" && jobState !== "completed") return;
+      if (jobState === "failed") {
+        const state = await this.#stateStore.get(
+          request.repository, request.pullRequestNumber,
+        );
+        await this.#stateStore.exhaustAnalysis(
+          request.repository, request.pullRequestNumber,
+          reviewScope(request), state?.attemptId,
+        );
+        return;
+      }
+      if (jobState !== "completed") return;
       await existing.remove();
     }
     try {

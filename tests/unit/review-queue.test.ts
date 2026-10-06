@@ -20,6 +20,66 @@ function request(headSha = oldHead, deliveryId = "delivery-1"): ReviewRequest {
 }
 
 describe("durable review queue behavior", () => {
+  it("does not reset a retained failed job's attempts during reconciliation", async () => {
+    const remove = vi.fn();
+    const queue = { add: vi.fn(), close: vi.fn(), getJob: vi.fn().mockResolvedValue({ getState: async () => "failed", remove }) };
+    const state = new InMemoryReviewStateStore();
+    await state.recordRequested("owner/project", 7, oldHead);
+    await state.tryStart("owner/project", 7, oldHead, "attempt");
+    await state.fail("owner/project", 7, oldHead, "attempt");
+    const reviews = new BullMqReviewQueue({queue, stateStore: state});
+    for (let i = 0; i < 5; i++) await reviews.enqueue(request(oldHead, `reconcile-${i}`));
+    expect(remove).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+    expect((await state.get("owner/project", 7))?.analysisExhaustedScope).toBe(oldHead);
+  });
+
+  it("does not reset retries if the retained job fails during scheduling", async () => {
+    const remove = vi.fn();
+    const getState = vi.fn().mockResolvedValueOnce("delayed").mockResolvedValue("failed");
+    const queue = { add: vi.fn(), close: vi.fn(), getJob: vi.fn().mockResolvedValue({ getState, remove }) };
+    const state = new InMemoryReviewStateStore();
+    await state.recordRequested("owner/project", 7, oldHead);
+    await new BullMqReviewQueue({queue, stateStore: state}).enqueue(request());
+    expect(remove).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+    expect((await state.get("owner/project", 7))?.analysisExhaustedScope).toBe(oldHead);
+  });
+
+  it("keeps exhausted scopes stopped after queue retention expires, but permits an explicit new scope", async () => {
+    const state = new InMemoryReviewStateStore();
+    const queue = { add: vi.fn(), close: vi.fn(), getJob: vi.fn().mockResolvedValue(undefined) };
+    const original = {...request(), baseBranch: "main", baseSha: newHead};
+    const reviews = new BullMqReviewQueue({queue, stateStore: state});
+    await reviews.enqueue(original);
+    const scope = (await state.get("owner/project", 7))!.latestRequestedHeadSha;
+    await state.tryStart("owner/project", 7, scope, "attempt");
+    await state.fail("owner/project", 7, scope, "attempt");
+    expect(await state.exhaustAnalysis("owner/project", 7, scope, "attempt")).toBe(true);
+    queue.add.mockClear();
+    const restarted = new BullMqReviewQueue({queue, stateStore: state});
+    for (let i = 0; i < 5; i++) await restarted.enqueue({...original, deliveryId: `reconcile-${i}`});
+    expect(queue.add).not.toHaveBeenCalled();
+    expect(await state.tryStart("owner/project", 7, scope, "late-retry")).toBe(false);
+    await restarted.enqueue({...original, rerunNonce: "operator-rerun"});
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect((await state.get("owner/project", 7))!.latestRequestedHeadSha).not.toBe(scope);
+  });
+
+  it("fences exhaustion against a replacement attempt, new scope and publication handoff", async () => {
+    const state = new InMemoryReviewStateStore();
+    await state.recordRequested("owner/project", 7, oldHead);
+    await state.tryStart("owner/project", 7, oldHead, "old");
+    await state.fail("owner/project", 7, oldHead, "old");
+    await state.tryStart("owner/project", 7, oldHead, "new");
+    expect(await state.exhaustAnalysis("owner/project", 7, oldHead, "old")).toBe(false);
+    await state.handoff("owner/project", 7, oldHead, "{}", "new");
+    expect(await state.exhaustAnalysis("owner/project", 7, oldHead, "new")).toBe(false);
+    await state.recordRequested("owner/project", 7, newHead);
+    expect(await state.exhaustAnalysis("owner/project", 7, oldHead, "new")).toBe(false);
+    expect((await state.get("owner/project", 7))?.analysisExhaustedScope).toBeUndefined();
+  });
+
   it("uses repairable per-scope job identities and bounded retries", async () => {
     const queue = {
       add: vi.fn().mockResolvedValue({}),

@@ -31,7 +31,7 @@ describe("Redis review state adapter", () => {
     await expect(
       store.recordRequested("owner/project", 7, headSha),
     ).resolves.toBe(true);
-    expect(redis.defineCommand).toHaveBeenCalledTimes(10);
+    expect(redis.defineCommand).toHaveBeenCalledTimes(11);
     expect(redis.runCommand).toHaveBeenCalledWith(
       "autoAgentRecordReviewRequest",
       [

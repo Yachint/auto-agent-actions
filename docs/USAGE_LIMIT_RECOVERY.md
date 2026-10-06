@@ -24,3 +24,9 @@ One large review may still exceed the account's allowance. These settings reduce
 The compiled assets total approximately 404 KiB. Derived images reuse existing layers; source/artifacts and protected backups should use tens of MiB, depending on Redis data size. No new long-running services are proposed. The three existing application services restart; a short webhook interruption is expected. At inspection the server had 4.6 GiB free and two delayed review jobs.
 
 If promotion or live validation fails, restore the original image references and configuration, recreate server/publisher and keep analysis stopped while diagnosing. Do not erase Redis state, credentials or review data, or remove old images as part of this incident.
+
+## Follow-up after the owner paused production
+
+The owner stopped the containers when usage kept draining after the initial quota/effort fix. Source inspection found that reconciliation removed terminal failed analysis jobs and recreated them with fresh attempts. The follow-up persists terminal analysis exhaustion in Redis and gates scheduling and execution for that scope. Older retained failed jobs are preserved and acquire the same gate. Blocked inspection terminates on its first attempt; other analysis failures have at most two attempts. Missing-job insertion repair remains available. A new head/base/policy or an explicit operator re-review permits a new scope. Quota deferral continues to use the durable cooldown.
+
+The build and 203 standard tests pass, including repeated reconciliation, job-retention loss, scheduling races and stale-owner fencing. Eight optional platform/infrastructure tests were skipped locally. Production remains stopped while the final live blocker is diagnosed; renewed Tailscale SSH authentication is currently required. No live model call was made after the owner paused production.
