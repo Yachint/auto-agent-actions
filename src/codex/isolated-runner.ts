@@ -10,6 +10,7 @@ import {
 import path from "node:path";
 import { createGitExecutor } from "../repositories/git.js";
 import { createModelProxy, ModelAuthenticationError } from "./model-proxy.js";
+import { ReviewModelBudget } from "./model-budget.js";
 import {
   executeProcess,
   CodexExecutionError,
@@ -24,6 +25,7 @@ export async function runIsolatedReview(
     headSha: string;
     sandboxBinary: string;
   },
+  dependencies: { createProxy?: typeof createModelProxy } = {},
 ) {
   const source = options.environment ?? process.env;
   const credentials = await modelCredentials(source);
@@ -34,9 +36,13 @@ export async function runIsolatedReview(
   const refs = `refs/auto-agent-actions/isolation/${randomUUID()}`;
   const bundle = path.join(root, "snapshot.bundle");
   const snapshot = path.join(root, "repository");
-  const proxy = await createModelProxy({
+  const proxy = await (dependencies.createProxy ?? createModelProxy)({
     model: options.model,
     timeoutMs: options.timeoutMs,
+    budget: options.modelBudget ?? new ReviewModelBudget(),
+    onRequest: (diagnostics) => options.onModelDiagnostics?.({
+      kind: "request", ...(options.modelContext ?? { phase: "review" }), diagnostics,
+    }),
     ...(options.onUsage === undefined ? {} : { onUsage: options.onUsage }),
     ...credentials,
   });
@@ -157,15 +163,21 @@ export async function runIsolatedReview(
     });
     if (proxy.usageLimit()) throw proxy.usageLimit();
     if (proxy.policyFailure()) throw proxy.policyFailure();
+    if (proxy.budgetFailure()) throw proxy.budgetFailure();
     return output;
   } catch (error) {
     if (proxy.usageLimit()) throw proxy.usageLimit();
     if (proxy.policyFailure()) throw proxy.policyFailure();
     if (proxy.authenticationFailed()) throw new ModelAuthenticationError();
+    if (proxy.budgetFailure()) throw proxy.budgetFailure();
     if (error instanceof CodexExecutionError) error.proxyDiagnostics = proxy.diagnostics();
     throw error;
   } finally {
     await proxy.close();
+    try { options.onModelDiagnostics?.({
+      kind: "invocation", ...(options.modelContext ?? { phase: "review" }),
+      diagnostics: proxy.diagnostics(),
+    }); } catch { /* Safe telemetry cannot prevent snapshot cleanup. */ }
     for (const name of ["base", "head"])
       await git({
         args: [

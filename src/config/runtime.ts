@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ReasoningEffort } from "../codex/runner.js";
+import { DEFAULT_MODEL_BUDGET, ReviewModelBudget, type ModelBudgetLimits } from "../codex/model-budget.js";
 
 export interface WebhookServerConfig {
   readonly host: string;
@@ -42,6 +43,7 @@ export interface AnalysisWorkerConfig extends QueueRuntimeConfig {
   readonly adaptiveEffort: boolean;
   readonly agentThreads: 1 | 2 | 3;
   readonly batchFiles?: number;
+  readonly modelBudgetLimits: ModelBudgetLimits;
 }
 
 export interface PublisherWorkerConfig extends QueueRuntimeConfig {
@@ -122,6 +124,17 @@ export function loadReviewBatchFiles(source: NodeJS.ProcessEnv = process.env): n
   return positiveInteger(value, "REVIEW_BATCH_FILES", 32);
 }
 
+export function loadModelBudgetLimits(source: NodeJS.ProcessEnv = process.env): ModelBudgetLimits {
+  const limits = {
+    maxRequests: positiveInteger(source.REVIEW_MAX_MODEL_REQUESTS ?? String(DEFAULT_MODEL_BUDGET.maxRequests), "REVIEW_MAX_MODEL_REQUESTS", 200),
+    maxRequestsPerInvocation: positiveInteger(source.REVIEW_MAX_GROUP_REQUESTS ?? String(DEFAULT_MODEL_BUDGET.maxRequestsPerInvocation), "REVIEW_MAX_GROUP_REQUESTS", 200),
+    maxRequestBytes: positiveInteger(source.REVIEW_MAX_REQUEST_BYTES ?? String(DEFAULT_MODEL_BUDGET.maxRequestBytes), "REVIEW_MAX_REQUEST_BYTES", 2 * 1024 * 1024),
+    maxInputTokens: positiveInteger(source.REVIEW_MAX_INPUT_TOKENS ?? String(DEFAULT_MODEL_BUDGET.maxInputTokens), "REVIEW_MAX_INPUT_TOKENS", 10_000_000),
+    maxOutputTokens: positiveInteger(source.REVIEW_MAX_OUTPUT_TOKENS ?? String(DEFAULT_MODEL_BUDGET.maxOutputTokens), "REVIEW_MAX_OUTPUT_TOKENS", 1_000_000),
+  };
+  return new ReviewModelBudget(limits).limits;
+}
+
 export async function loadAnalysisWorkerConfig(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<AnalysisWorkerConfig> {
@@ -130,6 +143,7 @@ export async function loadAnalysisWorkerConfig(
   return {
     ...common,
     agentThreads: loadReviewAgentThreads(source),
+    modelBudgetLimits: loadModelBudgetLimits(source),
     ...(batchFiles === undefined ? {} : { batchFiles }),
     concurrency: positiveInteger(
       source.REVIEW_WORKER_CONCURRENCY ?? "1",

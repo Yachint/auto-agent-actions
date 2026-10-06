@@ -20,6 +20,8 @@ This document separates locally verified behavior from checks that require the o
 | Missed webhooks are recovered | Reconciliation processor tests using the same durable queue/state idempotency path |
 | Reconciliation cannot reset terminal analysis attempts | Exhaustion-gate scheduling/execution tests and live Redis acceptance across reconciliation, store recreation, and job-retention loss |
 | Opt-in grouped review resumes completed inspections without publishing partial results | In-memory checkpoint/quota/cancellation/corruption tests and workflow integration tests requiring candidate verification after resume |
+| Model request budgets span groups and verification and cannot auto-retry on exhaustion | Proxy admission/concurrency/token/size tests, shared-budget/resume workflow tests, and disposable Redis/BullMQ terminal-exhaustion acceptance |
+| An isolated Codex child stops at its budget without further inference | VPS native Codex/sandbox test stopped a simulated tool loop after exactly two requests; no external inference or credentials were accessible |
 | Crashed worktrees are cleaned without path escape | Repository cleanup tests |
 | Runtime state, readiness, queue gauges, and operational counters are available without public metrics exposure | Redis state, app, metrics, and machine-checked Traefik/Compose routing boundaries |
 | Production dependencies have no currently reported npm advisory | `npm audit --omit=dev` and the full `npm audit` reported 0 vulnerabilities on 2026-09-02 after updating the lockfile to patched transitive releases |
@@ -27,6 +29,8 @@ This document separates locally verified behavior from checks that require the o
 The 2026-09-30 update passed TypeScript build and 177 tests under Node 24, including opt-in real Redis/BullMQ recovery, Unix-socket and native isolation tests. Both runtime images build. Codex CLI 0.155.1 passes strict configuration, hardened read-only preflight and a synthetic isolated diff-inspection/write-denial/coverage canary. Full dependency audit reports zero vulnerabilities on this date. These checks use synthetic fixtures and no private App or live model calls. See [PIPELINE_V2.md](PIPELINE_V2.md) for current recovery semantics, optional features, limits and coordinated migration requirements.
 
 ## Owner/VPS verification required
+
+The budget/diagnostics update passed build/static-asset copying and all 254 tests exclusively on the VPS using its existing dependencies, disposable Redis, Unix sockets and the installed native sandbox, with no real model calls. The earlier first-group trial has no checkpoint to inspect. Per-request diagnostics will explain future trials; smaller live checkpoint/resume acceptance remains required after account usage resets. Analysis remains stopped.
 
 1. Deliver a signed test webhook against the new release, open a same-repository PR with a publishable finding, and verify exactly one correctly anchored `REQUEST_CHANGES` review against the current head. Then verify a clean new head receives a summary-only `COMMENT`.
 2. Push a replacement commit during a deliberately slow review and verify no review is posted for the obsolete SHA.

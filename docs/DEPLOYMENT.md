@@ -104,11 +104,29 @@ Quota exhaustion defers analysis behind a persistent queue-wide cooldown without
 
 `CODEX_AGENT_THREADS=1` disables delegation. Adaptive effort can lower the configured effort and thread count but cannot raise them. Monitor the account's five-hour meter as well as token counters; token counts do not directly predict subscription usage.
 
+Analysis now requires per-job isolation to enforce these parent-owned model budgets:
+
+| Setting | Default | Scope |
+| --- | --- | --- |
+| `REVIEW_MAX_MODEL_REQUESTS` | 24 | One analysis attempt, including every group and final verification |
+| `REVIEW_MAX_GROUP_REQUESTS` | 8 | Each model invocation, including final verification |
+| `REVIEW_MAX_REQUEST_BYTES` | 65536 | Each encoded request, checked before upstream dispatch |
+| `REVIEW_MAX_INPUT_TOKENS` | 200000 | Observed gross input tokens across the attempt, including cached input |
+| `REVIEW_MAX_OUTPUT_TOKENS` | 10000 | Observed output tokens across the attempt |
+
+Request count and request size have strict admission ceilings. Upstream calls are serialized so concurrent agent calls cannot race the token check. Token ceilings use reported response usage: one already-dispatched response can exceed a token ceiling, at which point the child is aborted and no further requests are admitted. Missing, malformed, or oversized usage events fail closed; credential failures and quota cooldown keep their existing precedence. These limits do not represent a percentage of subscription allowance, so retain account-meter monitoring for live acceptance.
+
+Budget failures discard the job on its first failed attempt and persist the exhausted scope; reconciliation cannot reset them. Other failures retain the existing bounded retry policy. Quota deferral or an explicit new attempt creates a fresh in-memory budget, while completed checkpoints can still be reused. Changing a budget changes scheduling policy identity but does not invalidate otherwise identical completed checkpoints. Coordinate worker versions before promotion.
+
+Safe per-request logs include attempt ID, phase/group numbers, request and tool-output byte counts, input-item count, elapsed time, status, usage-observed flag, and input/cached-input/output token counts. Invocation summaries include aggregate counts and existing tool success/failure diagnostics. Commands, paths, model text, and credentials are never included. This instrumentation is forward-looking; it cannot recover the previous trial's missing per-request token breakdown.
+
 `REVIEW_BATCH_FILES` is blank by default. Setting it to an integer from 1 through 32 enables sequential inspections with that many changed paths per group. Each inspection still reads the frozen comparison/head diff and surrounding code as needed. Completed groups are checkpointed by the parent under `REVIEW_DATA_DIR/checkpoints`; an interrupted or quota-limited attempt can reuse them for the same frozen scope and trusted policy. Groups run sequentially under the existing resource ceilings. Any candidate findings require a final independent verification pass, even when `REVIEW_VERIFY_FINDINGS=false`. Publication still requires all groups to complete, exact-diff validation, and a current-head check. A blocked group remains terminal; checkpoints do not bypass the exhaustion gate or automatically request another review.
 
 Checkpoints contain validated review results and path metadata, which can include private code excerpts in finding bodies. They contain no raw prompts, patches, or credentials. Files use mode 0600, the directory uses mode 0700, writes use atomic replacement, and reads reject symlinks, oversized files, malformed output, and scope mismatches. Each file is capped at 1 MiB; a 123-path review with groups of 16 can retain up to eight files (8 MiB maximum), excluding filesystem overhead. No automatic retention cleanup is configured, so account for accumulated scopes in disk monitoring. Checkpoints are disposable and need no backup; do not delete them during an active review. Coordinate worker versions before changing the flag because it changes the scheduling policy. Enabling this persistent cache and its runtime setting requires the owner's specific machine-change authorization.
 
 October 6 incident acceptance: the retry/cooldown fixes through `6b997ed` were deployed using derived images with existing dependencies. The current 123-path Agenda PR still returned a blocked inspection despite successful Git/tool calls; it did not produce a completed review. Analysis was stopped at the agreed usage threshold. The owner then authorized the 16-file resumable option and a trial capped at 65% five-hour usage. All application services were promoted to `bb6c12c`; the first inspection group was still running when the ceiling was reached after roughly 70 seconds, so analysis was stopped. No completed-group progress was logged. The job remains delayed after one attempt; the option is configured but analysis is stopped. Live checkpoint resume and full review completion remain unverified.
+
+Subsequent budget/diagnostics verification ran exclusively on the VPS with preinstalled Node 24.21.0, TypeScript 7.0.2 and Vitest 4.1.11. It used read-only dependencies, disabled Vitest caches, disposable network-isolated Redis, Unix sockets, and the preinstalled native sandbox/Codex CLI with simulated inference. Build/static assets and all 254 tests passed, with no package installation or production model calls. The real CLI tool-loop test was stopped after exactly two simulated requests. Budget-enabled runtime promotion and a smaller live pilot remain pending; production analysis stays stopped.
 
 
 ## September 2026 upgrade

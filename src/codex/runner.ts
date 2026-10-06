@@ -1,6 +1,7 @@
 import { UsageCollector, type CodexUsage, type ToolFailureDiagnostics } from "./usage.js";
 import type { ModelUsageLimitError } from "./model-limit.js";
-import type { ModelProxyDiagnostics } from "./model-proxy.js";
+import type { ModelProxyDiagnostics, ModelRequestDiagnostics } from "./model-proxy.js";
+import type { ReviewModelBudget } from "./model-budget.js";
 import { spawn } from "node:child_process";
 import { readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -41,7 +42,20 @@ export interface CodexRunnerOptions {
   maxReviewOutputBytes?: number;
   signal?: AbortSignal;
   onUsage?: (usage: CodexUsage) => void;
+  modelBudget?: ReviewModelBudget;
+  modelContext?: ModelDiagnosticContext;
+  onModelDiagnostics?: (event: ModelDiagnosticEvent) => void;
 }
+
+export interface ModelDiagnosticContext {
+  phase: "review" | "inspection" | "verification";
+  group?: number;
+  groups?: number;
+}
+export type ModelDiagnosticEvent = ModelDiagnosticContext & (
+  { kind: "request"; diagnostics: ModelRequestDiagnostics } |
+  { kind: "invocation"; diagnostics: ModelProxyDiagnostics }
+);
 
 export interface CodexSandboxPreflightOptions {
   codexBinary?: string;

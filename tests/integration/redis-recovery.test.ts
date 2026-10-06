@@ -10,6 +10,8 @@ import { BullMqPublicationQueue } from "../../src/queue/publication-queue.js";
 import { ModelCooldownStore } from "../../src/queue/model-cooldown.js";
 import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
 import { runWithModelCooldown } from "../../src/workflows/model-cooldown.js";
+import { DEFAULT_MODEL_BUDGET, ReviewModelBudget } from "../../src/codex/model-budget.js";
+import { isTerminalInspectionFailure } from "../../src/workflows/analysis-failure.js";
 
 const enabled = process.env.RUN_REDIS_TEST === "1";
 const suffix = randomUUID().replaceAll("-", "");
@@ -30,6 +32,43 @@ const request = {
 };
 
 describe.skipIf(!enabled)("real Redis/BullMQ pipeline recovery", () => {
+  it("discards a budget failure on its first attempt and preserves exhaustion across reconciliation", async () => {
+    const pr = 3;
+    const key = reviewStateRedisKey(repository, pr);
+    const name = `aaa-budget-${suffix}`;
+    const queue = new Queue(name, { connection: redis }); queues.push(queue);
+    await state.recordRequested(repository, pr, head);
+    let calls = 0;
+    const worker = new Worker(name, async (job) => {
+      calls++;
+      const attemptId = randomUUID();
+      await state.tryStart(repository, pr, head, attemptId);
+      const budget = new ReviewModelBudget({ ...DEFAULT_MODEL_BUDGET, maxRequests: 1 });
+      const invocation = budget.invocation();
+      const release = await invocation.acquire();
+      budget.observe({ inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 }); release();
+      try { await invocation.acquire(); }
+      catch (error) {
+        await state.fail(repository, pr, head, attemptId);
+        if (isTerminalInspectionFailure(error)) {
+          job.discard(); await state.exhaustAnalysis(repository, pr, head, attemptId);
+        }
+        throw error;
+      }
+    }, { connection: redis }); workers.push(worker);
+    try {
+      const job = await queue.add("review", {}, { attempts: 2 });
+      for (let i = 0; i < 100 && await job.getState() !== "failed"; i++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(await job.getState()).toBe("failed");
+      expect((await queue.getJob(job.id!))?.attemptsMade).toBe(1);
+      expect(calls).toBe(1);
+      const restarted = new RedisReviewStateStore(createIORedisClient(redis));
+      expect((await restarted.get(repository, pr))?.analysisExhaustedScope).toBe(head);
+      expect(await restarted.recordRequested(repository, pr, head)).toBe(false);
+      expect(await restarted.tryStart(repository, pr, head, "reconciled")).toBe(false);
+    } finally { await worker.close(); await redis.del(key); }
+  });
   it("persists exhausted scope gates across Redis store recreation and queue retention", async () => {
     const pr = 2;
     const key = reviewStateRedisKey(repository, pr);

@@ -1,6 +1,8 @@
 import { verifyIsolationPolicy } from "./codex/isolation-preflight.js";
 import { statfs, mkdir } from "node:fs/promises";
 import { ModelAuthenticationError, ModelProxyPolicyError } from "./codex/model-proxy.js";
+import { ModelBudgetExceededError } from "./codex/model-budget.js";
+import { isTerminalInspectionFailure } from "./workflows/analysis-failure.js";
 import { ModelCooldownStore } from "./queue/model-cooldown.js";
 import { runWithModelCooldown } from "./workflows/model-cooldown.js";
 import { startWorkerHeartbeat } from "./observability/worker-health.js";
@@ -77,6 +79,7 @@ const processor = new AnalysisJobProcessor(
     verifyFindings: config.verifyFindings,
     adaptiveEffort: config.adaptiveEffort,
     agentThreads: config.agentThreads,
+    modelBudgetLimits: config.modelBudgetLimits,
     ...(config.batchFiles === undefined ? {} : { batchFiles: config.batchFiles }),
     reasoningEffort: config.reasoningEffort,
     timeoutMs: config.timeoutMs,
@@ -109,6 +112,9 @@ const processor = new AnalysisJobProcessor(
     },
     onBatchProgress: (completed, total, reused) => {
       logger.info({ completed, total, reused }, "review inspection group completed");
+    },
+    onModelDiagnostics: (event, attemptId) => {
+      logger.info({ attemptId, ...event }, "review model usage diagnostics");
     },
   },
 );
@@ -205,12 +211,13 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
             proxyFailureReason: failure.reason,
             proxyDiagnostics: failure.diagnostics,
           } : {}),
+          ...(failure instanceof ModelBudgetExceededError ? {
+            budgetReason: failure.reason, budgetTotals: failure.totals,
+          } : {}),
         },
         "analysis attempt failed",
       );
-      const inspectionBlocked =
-        (failure instanceof CodexExecutionError && failure.failureKind === "blocked") ||
-        failure instanceof ModelProxyPolicyError;
+      const inspectionBlocked = isTerminalInspectionFailure(failure);
       if (inspectionBlocked) job.discard();
       if (inspectionBlocked || job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
         await stateStore.exhaustAnalysis(
@@ -257,6 +264,7 @@ const worker: Worker<ReviewRequest, string, "review"> = new Worker(
 );
 
 function classifyFailure(error: unknown): AnalysisFailureCode {
+  if (error instanceof ModelBudgetExceededError) return "inspection-blocked";
   if (error instanceof ModelProxyPolicyError) return "inspection-blocked";
   if (error instanceof StaleReviewRefError) {
     return error.refName === "base" ? "base-ref-changed" : "head-ref-changed";

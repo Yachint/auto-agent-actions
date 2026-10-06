@@ -66,9 +66,9 @@ describe.skipIf(process.env.RUN_NATIVE_SANDBOX_TEST !== "1")(
     beforeAll(async () => {
       root = await mkdtemp(path.join(tmpdir(), "aaa-isolation-test-"));
       job = path.join(root, "job");
-      binary = path.join(root, "sandbox");
+      binary = process.env.AAA_NATIVE_SANDBOX_BINARY ?? path.join(root, "sandbox");
       await mkdir(job);
-      await exec("cc", [
+      if (process.env.AAA_NATIVE_SANDBOX_BINARY === undefined) await exec("cc", [
         "-O2",
         "-Wall",
         "-Wextra",

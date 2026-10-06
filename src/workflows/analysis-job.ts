@@ -38,6 +38,7 @@ export interface AnalysisJobOptions {
   readonly adaptiveEffort?: boolean;
   readonly agentThreads?: 1 | 2 | 3;
   readonly batchFiles?: number;
+  readonly modelBudgetLimits?: import("../codex/model-budget.js").ModelBudgetLimits;
 }
 
 export interface AnalysisJobDependencies {
@@ -48,6 +49,7 @@ export interface AnalysisJobDependencies {
   readonly publicationQueue: PublicationQueue;
   readonly onUsage?: (usage: import("../codex/usage.js").CodexUsage) => void;
   readonly onBatchProgress?: (completed: number, total: number, reused: boolean) => void;
+  readonly onModelDiagnostics?: (event: import("../codex/runner.js").ModelDiagnosticEvent, attemptId: string) => void;
   readonly onRejectedFindings?: (count: number) => void;
   readonly createRepositoryClient?: (token: string) => GitHubRepositoryClient;
   readonly runReview?: (
@@ -220,6 +222,10 @@ export class AnalysisJobProcessor {
         signal: controller.signal,
         ...(this.#options.agentThreads === undefined ? {} : { agentThreads: this.#options.agentThreads }),
         ...(this.#options.batchFiles === undefined ? {} : { batchFiles: this.#options.batchFiles }),
+        ...(this.#options.modelBudgetLimits === undefined ? {} : { modelBudgetLimits: this.#options.modelBudgetLimits }),
+        ...(this.#dependencies.onModelDiagnostics === undefined ? {} : {
+          onModelDiagnostics: (event) => this.#dependencies.onModelDiagnostics!(event, attemptId),
+        }),
         ...(this.#options.verifyFindings === undefined
           ? {}
           : { verifyFindings: this.#options.verifyFindings }),

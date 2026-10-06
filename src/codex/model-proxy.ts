@@ -4,6 +4,7 @@ import { Readable, Transform } from "node:stream";
 import type { CodexUsage } from "./usage.js";
 import { modelLimitFromResponse, type ModelUsageLimitError } from "./model-limit.js";
 import { ModelResponseObserver } from "./model-response.js";
+import type { ReviewModelBudget } from "./model-budget.js";
 
 export interface ModelProxyDiagnostics {
   requests: number;
@@ -13,6 +14,21 @@ export interface ModelProxyDiagnostics {
   failedCommands: number;
   dispatchErrors: number;
   unsupportedCalls: number;
+  upstreamRequests: number;
+  totalRequestBytes: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+}
+
+export interface ModelRequestDiagnostics extends CodexUsage {
+  request: number;
+  requestBytes: number;
+  elapsedMs: number;
+  status: number;
+  usageObserved: boolean;
+  inputItems: number;
+  toolOutputBytes: number;
 }
 
 export class ModelProxyPolicyError extends Error {
@@ -31,6 +47,8 @@ export interface ModelProxyOptions {
   readonly timeoutMs: number;
   readonly fetch?: typeof globalThis.fetch;
   readonly onUsage?: (usage: CodexUsage) => void;
+  readonly budget?: ReviewModelBudget;
+  readonly onRequest?: (diagnostics: ModelRequestDiagnostics) => void;
 }
 
 /** Per-job, loopback-only capability. No GitHub, OAuth-refresh or generic URL forwarding. */
@@ -50,8 +68,12 @@ export async function createModelProxy(options: ModelProxyOptions) {
   const diagnostics: ModelProxyDiagnostics = {
     requests: 0, maxRequestBytes: 0, toolOutputs: 0,
     successfulCommands: 0, failedCommands: 0, dispatchErrors: 0, unsupportedCalls: 0,
+    upstreamRequests: 0, totalRequestBytes: 0,
+    inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
   };
   const limited = new AbortController();
+  const signal = options.budget === undefined ? limited.signal : AbortSignal.any([limited.signal, options.budget.signal]);
+  const admission = options.budget?.invocation();
   const denyPolicy = (reason: ModelProxyPolicyError["reason"]) => {
     policyFailure ??= new ModelProxyPolicyError(reason);
     policyFailure.diagnostics = { ...diagnostics };
@@ -79,7 +101,7 @@ export async function createModelProxy(options: ModelProxyOptions) {
       }).end();
       return;
     }
-    if (policyFailure || request.method !== "POST" || request.url !== "/v1/responses") {
+    if (policyFailure || options.budget?.failure() || request.method !== "POST" || request.url !== "/v1/responses") {
       response.writeHead(403).end();
       return;
     }
@@ -90,13 +112,16 @@ export async function createModelProxy(options: ModelProxyOptions) {
       return;
     }
     diagnostics.requests = requests;
+    let release: (() => void) | undefined;
+    let finalize: (() => void) | undefined;
     try {
       const chunks: Buffer[] = [];
       let size = 0;
       for await (const chunk of request) {
         size += Buffer.byteLength(chunk);
         diagnostics.maxRequestBytes = Math.max(diagnostics.maxRequestBytes, size);
-        if (size > 2 * 1024 * 1024) {
+        if (size > (options.budget?.limits.maxRequestBytes ?? 2 * 1024 * 1024)) {
+          options.budget?.deny("request-size");
           denyPolicy("request-size");
           response.writeHead(413).end();
           request.destroy();
@@ -114,6 +139,8 @@ export async function createModelProxy(options: ModelProxyOptions) {
         return;
       }
       // Only fixed numeric metadata survives; no commands, paths or tool output.
+      let toolOutputBytes = 0;
+      const inputItems = Array.isArray(payload.input) ? payload.input.length : 0;
       if (Array.isArray(payload.input)) {
         const advertised = new Set(
           Array.isArray(payload.tools)
@@ -128,6 +155,7 @@ export async function createModelProxy(options: ModelProxyOptions) {
             unsupported++;
           if (item.type !== "function_call_output" || typeof item.output !== "string") continue;
           outputs++;
+          toolOutputBytes += Buffer.byteLength(item.output);
           if (/Process exited with code 0\b/.test(item.output)) successful++;
           if (/Process exited with code [1-9][0-9]*\b/.test(item.output)) failed++;
           if (/unknown tool|unrecognized (?:tool|function)|error parsing function call|invalid function call/i.test(item.output)) dispatch++;
@@ -138,11 +166,45 @@ export async function createModelProxy(options: ModelProxyOptions) {
         diagnostics.dispatchErrors = Math.max(diagnostics.dispatchErrors, dispatch);
         diagnostics.unsupportedCalls = Math.max(diagnostics.unsupportedCalls, unsupported);
       }
+      release = await admission?.acquire();
+      if (response.destroyed) { release?.(); release = undefined; return; }
+      if (Date.now() >= expires) {
+        denyPolicy("expired"); release?.(); release = undefined;
+        response.writeHead(403).end(); return;
+      }
+      diagnostics.upstreamRequests++;
+      diagnostics.totalRequestBytes += size;
+      const ordinal = diagnostics.upstreamRequests;
+      const started = Date.now();
+      let status = 0;
+      let observedUsage: CodexUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+      const observeUsage = (usage: CodexUsage) => {
+        observedUsage = usage;
+        for (const name of ["inputTokens", "cachedInputTokens", "outputTokens"] as const)
+          diagnostics[name] = Math.min(Number.MAX_SAFE_INTEGER, diagnostics[name] + usage[name]);
+        options.budget?.observe(usage);
+        options.onUsage?.(usage);
+      };
+      let responseObserver: ModelResponseObserver | undefined;
+      let finished = false;
+      finalize = () => {
+        if (finished) return;
+        finished = true;
+        const usageObserved = responseObserver?.usageObserved() ?? false;
+        if (!usageObserved && !usageLimit && !authenticationFailed)
+          options.budget?.deny("unobserved-usage");
+        try { options.onRequest?.({ request: ordinal, requestBytes: size,
+          elapsedMs: Date.now() - started, status,
+          usageObserved, inputItems, toolOutputBytes, ...observedUsage }); }
+        catch { /* Diagnostic callbacks cannot break admission or retain content. */ }
+        release?.(); release = undefined;
+      };
       const controller = new AbortController();
       active.add(controller);
       response.once("close", () => {
         controller.abort();
         active.delete(controller);
+        finalize?.();
       });
       const upstream = await (options.fetch ?? globalThis.fetch)(url, {
         method: "POST",
@@ -156,16 +218,18 @@ export async function createModelProxy(options: ModelProxyOptions) {
         },
         signal: AbortSignal.any([
           controller.signal,
+          signal,
           AbortSignal.timeout(
             Math.min(300_000, Math.max(1, expires - Date.now())),
           ),
         ]),
       });
+      status = upstream.status;
       if (upstream.status === 401 || upstream.status === 403)
         authenticationFailed = true;
       const retryAfter = upstream.headers.get("retry-after");
-      const observer = new ModelResponseObserver(
-        options.onUsage, observeLimit, upstream.status, retryAfter,
+      responseObserver = new ModelResponseObserver(
+        observeUsage, observeLimit, upstream.status, retryAfter,
       );
       response.writeHead(upstream.status, {
         "Content-Type":
@@ -174,14 +238,15 @@ export async function createModelProxy(options: ModelProxyOptions) {
       if (upstream.body !== null) {
         const observed = new Transform({
           transform(chunk: Buffer, _encoding, callback) {
-            observer.push(chunk);
+            responseObserver!.push(chunk);
             callback(null, chunk);
           },
           flush(callback) {
-            observer.finish();
+            responseObserver!.finish();
             // A malformed/empty 429 is still a backoff signal.
             if (upstream.status === 429 && !usageLimit)
               observeLimit(modelLimitFromResponse(undefined, 429, retryAfter)!);
+            finalize?.();
             callback();
           },
         });
@@ -195,9 +260,12 @@ export async function createModelProxy(options: ModelProxyOptions) {
       } else {
         if (upstream.status === 429)
           observeLimit(modelLimitFromResponse(undefined, 429, retryAfter)!);
+        finalize?.();
         response.end();
       }
     } catch {
+      finalize?.();
+      release?.();
       if (!response.headersSent) response.writeHead(502);
       response.end();
     }
@@ -216,7 +284,8 @@ export async function createModelProxy(options: ModelProxyOptions) {
     usageLimit: () => usageLimit,
     policyFailure: () => policyFailure,
     diagnostics: (): ModelProxyDiagnostics => ({ ...diagnostics }),
-    signal: limited.signal,
+    budgetFailure: () => options.budget?.failure(),
+    signal,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     token,
     close: async () => {

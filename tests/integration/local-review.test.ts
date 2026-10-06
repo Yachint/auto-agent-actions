@@ -18,6 +18,7 @@ import { runReviewCore } from "../../src/workflows/review-core.js";
 import { DiskReviewCheckpointStore } from "../../src/codex/review-checkpoints.js";
 import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
 import type { CodexRunnerOptions } from "../../src/codex/runner.js";
+import { DEFAULT_MODEL_BUDGET, ModelBudgetExceededError } from "../../src/codex/model-budget.js";
 
 const execFileAsync = promisify(execFile);
 let fixture: Awaited<ReturnType<typeof createRepositoryFixture>>;
@@ -177,6 +178,47 @@ describe("local review workflow", () => {
       runCodex: async (invocation) => invocation.prompt.includes("Verify these candidate findings")
         ? { ...output, findings: [{ ...candidate, body: "Invented claim" }] } : output,
     })).rejects.toThrow("verification introduced or changed a candidate");
+  });
+
+  it("shares a budget with final verification and reuses completed inspection after a larger allowance", async () => {
+    const local = workflowOptions(fixture);
+    const memory = new Map<string, string>();
+    const checkpointStore = new DiskReviewCheckpointStore("/in-memory-checkpoints", {
+      read: async (file) => memory.get(file),
+      write: async (file, text) => { memory.set(file, text); },
+    });
+    const candidate = { title: "Changed line defect", body: "Concrete failure.", priority: 1 as const,
+      confidence: 0.95, path: "src/app.ts", start_line: 2, end_line: 2 };
+    const options = {
+      ...local, repository: "example/project", remoteUrl: fixture.sourcePath, baseBranch: "main",
+      pullRequestNumber: 7, expectedBaseSha: fixture.baseSha, expectedHeadSha: fixture.headSha,
+      batchFiles: 1, modelBudgetLimits: { ...DEFAULT_MODEL_BUDGET, maxRequests: 1 },
+    };
+    let requests = 0;
+    const phases: string[] = [];
+    const runCodex = async (invocation: CodexRunnerOptions) => {
+      phases.push(invocation.modelContext!.phase);
+      const release = await invocation.modelBudget!.invocation().acquire();
+      requests++;
+      invocation.modelBudget!.observe({ inputTokens: 4, cachedInputTokens: 2, outputTokens: 1 });
+      release();
+      return { status: "completed" as const, blocked_reason: null, findings: [candidate], summary: "Verified defect." };
+    };
+    await expect(runReviewCore(options, { checkpointStore, runCodex })).rejects.toBeInstanceOf(ModelBudgetExceededError);
+    expect(requests).toBe(1); expect(memory.size).toBe(1);
+    const result = await runReviewCore({ ...options, modelBudgetLimits: { ...DEFAULT_MODEL_BUDGET, maxRequests: 2 } }, { checkpointStore, runCodex });
+    expect(requests).toBe(2);
+    expect(phases).toEqual(["inspection", "verification", "verification"]);
+    expect(result.review.findings).toEqual([candidate]);
+  });
+
+  it("rejects budgeted direct execution before model access when isolation is disabled", async () => {
+    const local = workflowOptions(fixture);
+    await expect(runReviewCore({
+      ...local, repository: "example/project", remoteUrl: fixture.sourcePath, baseBranch: "main",
+      pullRequestNumber: 7, expectedBaseSha: fixture.baseSha, expectedHeadSha: fixture.headSha,
+      modelBudgetLimits: DEFAULT_MODEL_BUDGET,
+    })).rejects.toThrow("model budget enforcement requires per-job isolation");
   });
 });
 

@@ -36,15 +36,18 @@ export class ModelResponseObserver {
     this.#buffer = "";
   }
 
+  usageObserved(): boolean { return this.#accounted; }
+
   #read(line: string): void {
     try {
       const value = JSON.parse(line.replace(/^data:\s*/, "")) as Record<string, unknown>;
       const limit = modelLimitFromResponse(value, this.status, this.retryAfter);
       if (limit) this.onLimit(limit);
-      if (this.#accounted ||
-        !["response.completed", "response.failed", "response.incomplete"].includes(String(value.type)))
+      const plainResponse = value.object === "response";
+      if (this.#accounted || (!plainResponse &&
+        !["response.completed", "response.failed", "response.incomplete"].includes(String(value.type))))
         return;
-      const response = value.response as { usage?: Record<string, unknown> } | undefined;
+      const response = (plainResponse ? value : value.response) as { usage?: Record<string, unknown> } | undefined;
       const usage = response?.usage;
       if (!usage) return;
       const details = usage.input_tokens_details as { cached_tokens?: unknown } | undefined;
@@ -54,7 +57,8 @@ export class ModelResponseObserver {
         usage.output_tokens,
       ];
       if (!counts.every((count) =>
-        typeof count === "number" && Number.isSafeInteger(count) && count >= 0))
+        typeof count === "number" && Number.isSafeInteger(count) && count >= 0) ||
+        (counts[1] as number) > (counts[0] as number))
         return;
       this.#accounted = true;
       this.onUsage?.({
