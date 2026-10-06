@@ -77,6 +77,7 @@ const processor = new AnalysisJobProcessor(
     verifyFindings: config.verifyFindings,
     adaptiveEffort: config.adaptiveEffort,
     agentThreads: config.agentThreads,
+    ...(config.batchFiles === undefined ? {} : { batchFiles: config.batchFiles }),
     reasoningEffort: config.reasoningEffort,
     timeoutMs: config.timeoutMs,
     schemaPath: config.schemaPath,
@@ -105,6 +106,9 @@ const processor = new AnalysisJobProcessor(
     },
     onRejectedFindings: (count) => {
       void recordMetric("analysis_rejected_findings_total", count);
+    },
+    onBatchProgress: (completed, total, reused) => {
+      logger.info({ completed, total, reused }, "review inspection group completed");
     },
   },
 );

@@ -14,6 +14,10 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runLocalReview } from "../../src/workflows/local-review.js";
+import { runReviewCore } from "../../src/workflows/review-core.js";
+import { DiskReviewCheckpointStore } from "../../src/codex/review-checkpoints.js";
+import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
+import type { CodexRunnerOptions } from "../../src/codex/runner.js";
 
 const execFileAsync = promisify(execFile);
 let fixture: Awaited<ReturnType<typeof createRepositoryFixture>>;
@@ -116,6 +120,63 @@ describe("local review workflow", () => {
     ).rejects.toThrow(/simulated Codex failure/);
 
     await expect(access(worktreePath)).rejects.toThrow();
+  });
+
+  it("resumes cached inspection but always verifies candidates before returning a publishable result", async () => {
+    const memory = new Map<string, string>();
+    const checkpointStore = new DiskReviewCheckpointStore("/in-memory-checkpoints", {
+      read: async (file) => memory.get(file),
+      write: async (file, text) => { memory.set(file, text); },
+    });
+    const candidate = {
+      title: "Changed line defect", body: "A concrete failure on the changed line.",
+      priority: 1 as const, confidence: 0.95, path: "src/app.ts", start_line: 2, end_line: 2,
+    };
+    const output = { status: "completed" as const, blocked_reason: null, findings: [candidate], summary: "Candidate found." };
+    const local = workflowOptions(fixture);
+    const options = {
+      ...local, repository: "example/project", remoteUrl: fixture.sourcePath, baseBranch: "main",
+      pullRequestNumber: 7, expectedBaseSha: fixture.baseSha, expectedHeadSha: fixture.headSha,
+      batchFiles: 1, verifyFindings: false,
+    };
+    const calls: CodexRunnerOptions[] = [];
+    let limited = true;
+    const runCodex = async (invocation: CodexRunnerOptions) => {
+      calls.push(invocation);
+      if (invocation.prompt.includes("Verify these candidate findings")) {
+        expect(invocation.prompt).toContain("discard duplicate root causes");
+        if (limited) throw new ModelUsageLimitError(Date.now() + 1000);
+        return { ...output, findings: [], summary: "The candidate is already guarded and was discarded." };
+      }
+      return output;
+    };
+    await expect(runReviewCore(options, { checkpointStore, runCodex })).rejects.toBeInstanceOf(ModelUsageLimitError);
+    expect(memory.size).toBe(1);
+    limited = false;
+    const result = await runReviewCore(options, { checkpointStore, runCodex });
+    expect(calls).toHaveLength(3);
+    expect(calls.filter((call) => call.prompt.includes("<inspection_group>"))).toHaveLength(1);
+    expect(result.review.findings).toEqual([]);
+    expect(result.review.summary).toContain("Candidate verification:");
+    expect(result.review.summary).toContain("discarded");
+  });
+
+  it("rejects a grouped verification that invents or changes a finding", async () => {
+    const local = workflowOptions(fixture);
+    const candidate = {
+      title: "Changed line defect", body: "A concrete failure on the changed line.",
+      priority: 1 as const, confidence: 0.95, path: "src/app.ts", start_line: 2, end_line: 2,
+    };
+    const output = { status: "completed" as const, blocked_reason: null, findings: [candidate], summary: "Candidate found." };
+    await expect(runReviewCore({
+      ...local, repository: "example/project", remoteUrl: fixture.sourcePath, baseBranch: "main",
+      pullRequestNumber: 7, expectedBaseSha: fixture.baseSha, expectedHeadSha: fixture.headSha,
+      batchFiles: 1, verifyFindings: false,
+    }, {
+      checkpointStore: { read: async () => undefined, write: async () => {} },
+      runCodex: async (invocation) => invocation.prompt.includes("Verify these candidate findings")
+        ? { ...output, findings: [{ ...candidate, body: "Invented claim" }] } : output,
+    })).rejects.toThrow("verification introduced or changed a candidate");
   });
 });
 

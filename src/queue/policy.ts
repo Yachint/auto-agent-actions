@@ -1,4 +1,4 @@
-import { loadReviewIsolationConfig, loadReviewAgentThreads } from "../config/runtime.js";
+import { loadReviewIsolationConfig, loadReviewAgentThreads, loadReviewBatchFiles } from "../config/runtime.js";
 import { buildReviewPrompt } from "../codex/prompt.js";
 import { buildCodexArgs } from "../codex/runner.js";
 import { createHash } from "node:crypto";
@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 export function reviewPolicyHash(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
+  const batchFiles = loadReviewBatchFiles(environment);
   return createHash("sha256")
     .update(
       JSON.stringify([
@@ -50,6 +51,7 @@ export function reviewPolicyHash(
         environment.REVIEW_MINIMUM_CONFIDENCE ?? "0.8",
         environment.REVIEW_MAXIMUM_INLINE_COMMENTS ?? "20",
         environment.REVIEW_BLOCKING_PRIORITY ?? "1",
+        ...(batchFiles === undefined ? [] : ["sequential-checkpoints-v1", batchFiles]),
       ]),
     )
     .digest("hex");

@@ -98,6 +98,18 @@ The analysis logs must contain `Codex read-only sandbox preflight passed` before
 - Apply OS and container image updates regularly, rerun the full test/build preflight, and inspect dependency audit results before rollout.
 - Monitor restart counts, Redis persistence errors, queue depth, failed jobs, stale-result discards, reconciliation failures, and disk usage.
 
+### Usage limits and resumable reviews
+
+Quota exhaustion defers analysis behind a persistent queue-wide cooldown without consuming an analysis attempt. Other failures have a bounded attempt allowance; blocked inspection is terminal immediately. Reconciliation preserves an exhausted scope instead of deleting the failed job and resetting its attempts. A changed head/base/policy or an explicitly requested rerun creates a new scope. Stopping analysis prevents further model calls but makes readiness unhealthy.
+
+`CODEX_AGENT_THREADS=1` disables delegation. Adaptive effort can lower the configured effort and thread count but cannot raise them. Monitor the account's five-hour meter as well as token counters; token counts do not directly predict subscription usage.
+
+`REVIEW_BATCH_FILES` is blank by default. Setting it to an integer from 1 through 32 enables sequential inspections with that many changed paths per group. Each inspection still reads the frozen comparison/head diff and surrounding code as needed. Completed groups are checkpointed by the parent under `REVIEW_DATA_DIR/checkpoints`; an interrupted or quota-limited attempt can reuse them for the same frozen scope and trusted policy. Groups run sequentially under the existing resource ceilings. Any candidate findings require a final independent verification pass, even when `REVIEW_VERIFY_FINDINGS=false`. Publication still requires all groups to complete, exact-diff validation, and a current-head check. A blocked group remains terminal; checkpoints do not bypass the exhaustion gate or automatically request another review.
+
+Checkpoints contain validated review results and path metadata, which can include private code excerpts in finding bodies. They contain no raw prompts, patches, or credentials. Files use mode 0600, the directory uses mode 0700, writes use atomic replacement, and reads reject symlinks, oversized files, malformed output, and scope mismatches. Each file is capped at 1 MiB; a 123-path review with groups of 16 can retain up to eight files (8 MiB maximum), excluding filesystem overhead. No automatic retention cleanup is configured, so account for accumulated scopes in disk monitoring. Checkpoints are disposable and need no backup; do not delete them during an active review. Coordinate worker versions before changing the flag because it changes the scheduling policy. Enabling this persistent cache and its runtime setting requires the owner's specific machine-change authorization.
+
+October 6 incident acceptance: the retry/cooldown fixes through `6b997ed` were deployed using derived images with existing dependencies. The current 123-path Agenda PR still returned a blocked inspection despite successful Git/tool calls; it did not produce a completed review. Analysis was stopped at the agreed usage threshold. The resumable option is locally tested and remains disabled pending authorized live acceptance.
+
 
 ## September 2026 upgrade
 

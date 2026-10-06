@@ -37,6 +37,7 @@ export interface AnalysisJobOptions {
   readonly verifyFindings?: boolean;
   readonly adaptiveEffort?: boolean;
   readonly agentThreads?: 1 | 2 | 3;
+  readonly batchFiles?: number;
 }
 
 export interface AnalysisJobDependencies {
@@ -46,6 +47,7 @@ export interface AnalysisJobDependencies {
   readonly reviewQueue: ReviewQueue;
   readonly publicationQueue: PublicationQueue;
   readonly onUsage?: (usage: import("../codex/usage.js").CodexUsage) => void;
+  readonly onBatchProgress?: (completed: number, total: number, reused: boolean) => void;
   readonly onRejectedFindings?: (count: number) => void;
   readonly createRepositoryClient?: (token: string) => GitHubRepositoryClient;
   readonly runReview?: (
@@ -217,6 +219,7 @@ export class AnalysisJobProcessor {
       const result = await (this.#dependencies.runReview ?? runReviewCore)({
         signal: controller.signal,
         ...(this.#options.agentThreads === undefined ? {} : { agentThreads: this.#options.agentThreads }),
+        ...(this.#options.batchFiles === undefined ? {} : { batchFiles: this.#options.batchFiles }),
         ...(this.#options.verifyFindings === undefined
           ? {}
           : { verifyFindings: this.#options.verifyFindings }),
@@ -226,6 +229,9 @@ export class AnalysisJobProcessor {
         ...(this.#dependencies.onUsage === undefined
           ? {}
           : { onUsage: this.#dependencies.onUsage }),
+        ...(this.#dependencies.onBatchProgress === undefined
+          ? {}
+          : { onBatchProgress: this.#dependencies.onBatchProgress }),
         ...(this.#options.sandboxBinary === undefined
           ? {}
           : { sandboxBinary: this.#options.sandboxBinary }),

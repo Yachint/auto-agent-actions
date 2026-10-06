@@ -41,6 +41,7 @@ export interface AnalysisWorkerConfig extends QueueRuntimeConfig {
   readonly verifyFindings: boolean;
   readonly adaptiveEffort: boolean;
   readonly agentThreads: 1 | 2 | 3;
+  readonly batchFiles?: number;
 }
 
 export interface PublisherWorkerConfig extends QueueRuntimeConfig {
@@ -115,13 +116,21 @@ export function loadReviewIsolationConfig(
   };
 }
 
+export function loadReviewBatchFiles(source: NodeJS.ProcessEnv = process.env): number | undefined {
+  const value = source.REVIEW_BATCH_FILES;
+  if (value === undefined || value.trim() === "") return;
+  return positiveInteger(value, "REVIEW_BATCH_FILES", 32);
+}
+
 export async function loadAnalysisWorkerConfig(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<AnalysisWorkerConfig> {
   const common = await loadQueueRuntimeConfig(source);
+  const batchFiles = loadReviewBatchFiles(source);
   return {
     ...common,
     agentThreads: loadReviewAgentThreads(source),
+    ...(batchFiles === undefined ? {} : { batchFiles }),
     concurrency: positiveInteger(
       source.REVIEW_WORKER_CONCURRENCY ?? "1",
       "REVIEW_WORKER_CONCURRENCY",
