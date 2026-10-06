@@ -16,6 +16,7 @@ import {
   type ModelDiagnosticEvent,
 } from "../codex/runner.js";
 import { createGitExecutor } from "../repositories/git.js";
+import { buildGroupReviewContext } from "../repositories/review-context.js";
 import { DiffInspector, type ExactDiff } from "../repositories/diff.js";
 import {
   RepositoryManager,
@@ -210,6 +211,7 @@ export async function runReviewCore(
           output = await runResumableReview({
             invocation, taskPrompt, files: exactDiff.files,
             batchFiles: options.batchFiles, identity, execute: executeCodex,
+            groupContext: (files) => buildGroupReviewContext({ git: boundedGit, worktreePath: worktree.path, comparisonSha: exactDiff.mergeBaseSha ?? exactDiff.baseSha, headSha: fetched.headSha, files, signal }),
             store: dependencies.checkpointStore ?? new DiskReviewCheckpointStore(path.join(options.dataDirectory, "checkpoints")),
             ...(options.onBatchProgress === undefined ? {} : { onProgress: options.onBatchProgress }),
           });
