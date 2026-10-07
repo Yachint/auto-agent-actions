@@ -68,3 +68,30 @@ One successful queued attempt must finish every assigned unit, a cross-component
 The final full VPS build and test run passed all 284 tests, including Redis, Unix sockets, native isolation and a real Codex child with fake inference. A deterministic planner dry run on the frozen scope above represented all 124 paths in 68 units / 142 slices, with 16 paths split across slices. Encoded units ranged from 1,979 to 24,576 bytes (mean 19,308); all 1,183,650 raw patch bytes were represented. Planning took 1,381 ms. This is complete assignment, not completed model inspection or a measured review time. No local builds/tests, installations, Agenda edits or production model calls were performed.
 
 Runtime promotion and one monitored current-head review remain the acceptance steps. Keep medium effort and one agent. Do not claim a successful review, quota savings or caching improvement before that run completes and its actual GitHub review URL is confirmed.
+
+## Deployed acceptance result — incomplete review
+
+Promoted VPS-tested commit `fcc4603` with matching immutable application/analysis image IDs, protected configuration and Redis backups, and coordinated application restarts. Read-only and native isolation preflights and required static-asset reads passed. Persistent settings remain GPT-6.1 Sol, medium effort, one agent, maximum four paths per content unit, 16 requests per invocation and 128 KiB request bodies. Unit ceilings are 24 requests / 200,000 gross input / 10,000 output; aggregate ceilings are 400 requests / 4,000,000 input / 100,000 output.
+
+PR #16 advanced twice during preparation. The actual inference scope was head `6fcb0fe15a6f50e843619152e1ec3cf6f3ff9312`, base `e67a18e46f3c17aeecf34f2db65187f7ec4008fe`, with 69 units. GitHub still matched this scope at the final check. The hourly continuation remains paused.
+
+The acceptance did **not** complete or publish a review. It saved 22 of 69 protected, validated checkpoints (14,483 bytes; two unverified candidates). Analysis is stopped, the scope is exhausted, and active analysis jobs are zero; server, publisher and Redis remain running on the matching deployment. Partial inspection and candidates do not satisfy full review acceptance.
+
+| Measurement | Result |
+| --- | ---: |
+| Account usage before deployment / before analysis / final stop | 16% / 20% / 66% |
+| Gross input / reported cached input | 1,418,503 / 87,552 tokens (6.2%) |
+| Observed output | 14,650 tokens |
+| Requests / responses with observed usage | 108 / 106 |
+| Active attempt elapsed time, summed | 747,967 ms (about 12.5 minutes) |
+| Upstream durations, summed | 713,531 ms |
+| Largest encoded request | 91,752 bytes |
+| Non-200 upstream responses | 0 |
+
+Account percentages include desktop/chat/deployment investigation and are not an isolated reviewer-cost measure. Two interrupted requests have unobserved usage, so token totals are incomplete. Elapsed figures cover incomplete attempts, not a complete-review duration.
+
+The first stop was an operator-monitor error: a four-second shift in the reported reset timestamp was mistaken for a new usage window. The monitor was corrected to tolerate small timestamp jitter (60 seconds), and one explicitly authorized correction resumed the unchanged scope with all 19 prior checkpoints reused. The second stop was the agreed 66% account ceiling. Thus this is two attempts with one correction, not a successful single-attempt benchmark. In-flight cancellation failed closed as unobserved usage; no repeated automatic resume was enabled.
+
+A network-isolated, three-request synthetic Codex tool-loop check preserved its supplied input prefix and instructions. The pinned CLI supplied a cache key but no explicit cache options; official OpenAI documentation describes automatic implicit caching, so absence of an explicit setting does not establish a cache defect. The cause of low live cache reuse remains unproven.
+
+The earlier budget/scheduling fix is deployed, but acceptable large-PR cost is unverified. The next investigation must measure prefix stability and repeated supporting-code retrieval in real requests using content-free metadata, then reduce redundant investigation/context while retaining complete coverage, independent verification and exact-head publication. Do not raise ceilings or resume the unchanged scope repeatedly as a substitute for that fix. No further production run is eligible in this acceptance window.
