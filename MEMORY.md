@@ -258,6 +258,8 @@ This file is the durable, chronological handoff for future development sessions.
 
 - Contextual reviewer source is committed locally as `4e17b87` with matching deployment guidance in `ac6f528`. GitHub rejected authorized normal pushes over both SSH and HTTPS with repeated internal server errors; a read-only branch query confirmed the remote remains at `e68e1d6`. Promotion and live acceptance are blocked on publishing these commits. VPS production analysis remains stopped, hourly continuation remains paused, and no production model calls were made during contextual implementation/testing. Server liveness returns 200; readiness returns 503 as designed while analysis is stopped.
 
+- A subsequent normal GitHub push succeeded, clearing the external publication blocker. Pulled `63c0841` on the VPS and verified all 112 tracked source/test/build inputs match the 298-test candidate. Promoted matching application/analysis images built only from existing runtime dependencies, with protected configuration and Redis backups; static assets, read-only Codex and per-job native isolation preflights passed. Server/publisher run the new images; analysis was recreated but never started, and hourly continuation remains paused. Medium effort, one agent and all spending ceilings are unchanged. Server liveness is 200; readiness is 503 while analysis is intentionally stopped. Account usage reached 22%, above the previously authorized 20% restart threshold; no live inference or clean PR #16 review was performed during this deployment. Full-review completion and net quota savings remain pending.
+
 ## Unresolved decisions
 
 - Redis backup/restore rehearsal remains required for disaster-recovery confidence.
