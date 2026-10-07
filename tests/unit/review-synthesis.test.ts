@@ -15,6 +15,12 @@ describe("bounded integration and verification data", () => {
     const parsed=JSON.parse(context);expect(parsed).toHaveLength(200);
     expect(parsed.every((record:{summaryTruncated:boolean})=>record.summaryTruncated)).toBe(true);
   });
+  it("passes chunk boundaries as untrusted leads without repeating full briefs", () => {
+    const unit={id:"unit",chunkId:"chunk",boundaryPaths:["other/file.ts"],boundaryPathsTruncated:true,brief:"DO NOT REPEAT FULL BRIEF",files:[],slices:[],context:"[]"} as ReviewUnit;
+    const context=buildSynthesisContext([{unit,output:{status:"completed",blocked_reason:null,findings:[],summary:"Inspected"}}]);
+    expect(JSON.parse(context)[0]).toMatchObject({chunk:"chunk",boundaryPaths:["other/file.ts"],boundaryPathsTruncated:true});
+    expect(context).not.toContain("DO NOT REPEAT FULL BRIEF");
+  });
   it("keeps full original candidates in bounded verification batches", () => {
     const findings:ReviewFinding[]=Array.from({length:50},(_,i)=>({path:"src/f"+i+".ts",title:"Defect",body:"Evidence ".repeat(400),priority:1,confidence:0.95,start_line:1,end_line:1}));
     const batches=verificationBatches(findings);

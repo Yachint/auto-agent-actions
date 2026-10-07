@@ -3,13 +3,14 @@ import path from "node:path";
 import type { ChangedFile, DiffLineRange } from "./diff.js";
 import { DiffLimitError } from "./diff.js";
 import { decodeGitText, type GitExecutor } from "./git.js";
+import { loadReviewContexts, relativeReferences, isDeclarationBoundary, buildChunkBrief, encodeReviewData } from "./review-navigation.js";
+export { encodeReviewData } from "./review-navigation.js";
 
 export const MAX_REVIEW_UNIT_BYTES = 24 * 1024;
 const MAX_PLAN_BYTES = 32 * 1024 * 1024;
 const MAX_UNITS = 256;
-export const encodeReviewData = (data: unknown): string => JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 
-interface PatchLine { offset: number; end: number; headLine: number | null; oldLine: number | null; kind: string; hunk: string | null }
+interface PatchLine { offset: number; end: number; headLine: number | null; oldLine: number | null; kind: string; hunk: string | null; boundary: boolean }
 export interface ReviewPatchSlice {
   path: string;
   patch: string;
@@ -30,9 +31,13 @@ export interface ReviewUnit {
   files: ChangedFile[];
   slices: ReviewPatchSlice[];
   context: string;
+  chunkId?: string;
+  brief?: string;
+  boundaryPaths?: string[];
+  boundaryPathsTruncated?: boolean;
 }
 
-/** Complete frozen patches, split by encoded content, with static relative-import affinity. */
+/** Frozen patches grouped by bounded dependency neighborhoods, then split into independent inspections. */
 export async function buildReviewPlan(options: {
   git: GitExecutor; worktreePath: string; comparisonSha: string; headSha: string;
   files: readonly ChangedFile[]; maxFiles: number; signal?: AbortSignal;
@@ -72,37 +77,49 @@ export async function buildReviewPlan(options: {
     if (totalBytes > MAX_PLAN_BYTES) throw new DiffLimitError("review plan exceeds bounded patch capacity");
     pending.push(...splitReviewPatch(file, patch, limit));
     if (pending.length > MAX_UNITS * options.maxFiles) throw new DiffLimitError("review plan exceeds bounded unit capacity");
-    const imports = new Set<string>();
-    // This only recognizes static references in patch data. It never evaluates repository code.
-    for (const match of patch.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["'](\.[^"'\r\n]+)["']/g)) {
-      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file.path), match[1]!));
-      for (const candidate of [resolved, ...[".ts", ".tsx", ".js", ".jsx"].map(ext => resolved.replace(/\.[cm]?jsx?$/, "") + ext), ...["ts", "tsx", "js"].map(ext => `${resolved}/index.${ext}`)])
-        if (inventory.has(candidate)) imports.add(candidate);
-    }
-    dependencies.set(file.path, imports);
+    dependencies.set(file.path, new Set(relativeReferences(file.path, patch, new Set(inventory.keys()))));
   }
+  const contexts = await loadReviewContexts({ git: options.git, worktreePath: options.worktreePath,
+    headSha: options.headSha, files: options.files, ...(options.signal === undefined ? {} : { signal: options.signal }) });
+  for (const [name, context] of contexts) for (const target of context.references) dependencies.get(name)!.add(target);
   const importEdges = [...dependencies].flatMap(([from, targets]) => [...targets].map(target => [from, target] as const));
   for (const [from, target] of importEdges) dependencies.get(target)?.add(from);
-  const units: ReviewUnit[] = [];
-  while (pending.length > 0) {
-    options.signal?.throwIfAborted();
-    const slices = [pending.shift()!];
-    const names = new Set([slices[0]!.path]);
-    for (;;) {
-      const candidates = pending.map((slice, index) => ({ slice, index,
-        affinity: Math.max(...[...names].map(name => affinity(name, slice.path, dependencies))) }))
-        .sort((a, b) => b.affinity - a.affinity || a.index - b.index);
-      const next = candidates.find(({ slice, affinity }) => affinity > 0 &&
-        (names.has(slice.path) || names.size < options.maxFiles) &&
-        Buffer.byteLength(encodeReviewData([...slices, slice])) <= limit);
-      if (!next) break;
-      slices.push(...pending.splice(next.index, 1)); names.add(next.slice.path);
+  const chunks: ChangedFile[][] = [];
+  const remaining = [...options.files];
+  while (remaining.length) {
+    const chunk = [remaining.shift()!];
+    while (chunk.length < options.maxFiles) {
+      const next = remaining.map((file, index) => ({ index,
+        affinity: Math.max(...chunk.map(member => affinity(member.path, file.path, dependencies))) }))
+        .sort((a, b) => b.affinity - a.affinity || a.index - b.index)[0];
+      if (!next || next.affinity === 0) break;
+      chunk.push(...remaining.splice(next.index, 1));
     }
-    const files = [...names].map(name => ({ ...inventory.get(name)!, rightSideRanges: mergeRanges(slices.filter(slice => slice.path === name).flatMap(slice => slice.rightSideRanges)) }));
-    const context = encodeReviewData(slices);
-    const id = createHash("sha256").update(context).digest("hex");
-    units.push({ id, files, slices, context });
-    if (units.length > MAX_UNITS) throw new DiffLimitError("review plan exceeds bounded unit capacity");
+    chunks.push(chunk);
+  }
+  const units: ReviewUnit[] = [];
+  for (const chunk of chunks) {
+    const support = buildChunkBrief(chunk, contexts, dependencies);
+    const chunkNames = new Set(chunk.map(file => file.path));
+    const waiting = pending.filter(slice => chunkNames.has(slice.path));
+    while (waiting.length > 0) {
+      options.signal?.throwIfAborted();
+      const slices = [waiting.shift()!];
+      const names = new Set([slices[0]!.path]);
+      for (;;) {
+        const candidates = waiting.map((slice, index) => ({ slice, index,
+          affinity: Math.max(...[...names].map(name => affinity(name, slice.path, dependencies))) }))
+          .sort((a, b) => b.affinity - a.affinity || a.index - b.index);
+        const next = candidates.find(({ slice }) => Buffer.byteLength(encodeReviewData([...slices, slice])) <= limit);
+        if (!next) break;
+        slices.push(...waiting.splice(next.index, 1)); names.add(next.slice.path);
+      }
+      const files = [...names].map(name => ({ ...inventory.get(name)!, rightSideRanges: mergeRanges(slices.filter(slice => slice.path === name).flatMap(slice => slice.rightSideRanges)) }));
+      const context = encodeReviewData(slices);
+      const id = createHash("sha256").update(JSON.stringify([context, support.brief])).digest("hex");
+      units.push({ id, files, slices, context, ...support });
+      if (units.length > MAX_UNITS) throw new DiffLimitError("review plan exceeds bounded unit capacity");
+    }
   }
   // A coverage ledger is established before any model call. No truncated patch is treated as complete.
   for (const file of options.files) {
@@ -127,7 +144,8 @@ export function splitReviewPatch(file: ChangedFile, patch: string, limit = MAX_R
     if (text.startsWith("diff --git ")) { head = null; old = null; hunk = null; }
     const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
     if (header) { old = Number(header[1]); head = Number(header[2]); hunk = text.trimEnd(); }
-    lines.push({ offset, end: offset + text.length, headLine: head, oldLine: old, kind: header ? "hunk" : text[0] ?? "", hunk });
+    lines.push({ offset, end: offset + text.length, headLine: head, oldLine: old, kind: header ? "hunk" : text[0] ?? "", hunk,
+      boundary: !!header || ((text.startsWith("+") || text.startsWith(" ")) && isDeclarationBoundary(text.slice(1))) });
     if (!header && head !== null && old !== null) {
       if (text.startsWith("+")) head++;
       else if (text.startsWith("-")) old++;
@@ -157,8 +175,11 @@ export function splitReviewPatch(file: ChangedFile, patch: string, limit = MAX_R
     }
     if (low === start && patch.length > 0) throw new DiffLimitError("review patch metadata exceeds unit capacity");
     if (low < patch.length) {
+      const boundary = lines.filter(line => line.boundary && line.offset > start &&
+        line.offset >= start + (low - start) * 0.6 && line.offset <= low).at(-1);
       const newline = patch.lastIndexOf("\n", low - 1);
-      if (newline >= start) low = newline + 1;
+      if (boundary) low = boundary.offset;
+      else if (newline >= start) low = newline + 1;
       else if (low > start && /[\uD800-\uDBFF]/.test(patch[low - 1]!)) low--;
     }
     if (low === start && patch.length > 0) throw new DiffLimitError("review patch cannot fit a complete code point");

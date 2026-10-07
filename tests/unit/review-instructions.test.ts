@@ -14,6 +14,7 @@ describe("trusted review instructions", () => {
       "role",
       "trust_boundary",
       "investigation_workflow",
+      "staged_responsibilities",
       "delegation",
       "finding_gate",
       "finding_format",
@@ -41,6 +42,14 @@ describe("trusted review instructions", () => {
     expect(instructions).toContain("Subagents must not spawn descendants");
     expect(instructions).toContain("primary reviewer must independently validate");
     expect(instructions).toContain("emit the only final structured output");
+  });
+
+  it("keeps specialist assignments narrow while requiring integration and independent verification", () => {
+    expect(instructions).toContain("Complete every assigned slice");
+    expect(instructions).toContain("it never counts as inspection or proves a claim");
+    expect(instructions).toContain("parent runs this stage even when inspections returned no candidates");
+    expect(instructions).toContain("independently attempt to disprove every supplied candidate");
+    expect(instructions).toContain("Without a staged assignment, perform the complete investigation workflow yourself");
   });
 
   it("preserves the untrusted-input and fail-closed boundaries", () => {

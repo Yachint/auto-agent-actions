@@ -51,7 +51,7 @@ export function reviewPolicyHash(
         environment.REVIEW_MINIMUM_CONFIDENCE ?? "0.8",
         environment.REVIEW_MAXIMUM_INLINE_COMMENTS ?? "20",
         environment.REVIEW_BLOCKING_PRIORITY ?? "1",
-        ...(batchFiles === undefined ? [] : ["content-units-v2", batchFiles, loadReviewRunBudgetLimits(environment)]),
+        ...(batchFiles === undefined ? [] : ["contextual-units-v3", batchFiles, loadReviewRunBudgetLimits(environment)]),
         "model-budget-v1", loadModelBudgetLimits(environment),
       ]),
     )

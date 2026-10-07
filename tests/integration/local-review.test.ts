@@ -44,6 +44,11 @@ describe("local review workflow", () => {
           const phase=invocation.modelContext!.phase;phases.push(phase);
           const release=await invocation.modelBudget!.invocation().acquire();
           invocation.modelBudget!.observe({inputTokens:4,cachedInputTokens:0,outputTokens:1});release();
+          if(phase==="inspection") {
+            expect(invocation.prompt).toContain("<context_brief>");
+            expect(invocation.prompt).toContain("inspection specialist");
+          }
+          if(phase==="verification") expect(invocation.prompt).toContain("<candidate_verification>");
           if(phase==="synthesis"){
             expect(invocation.prompt).toContain("Untrusted inspection notes");
             expect(invocation.expectedPaths).toEqual(["src/app.ts","src/other.ts"]);

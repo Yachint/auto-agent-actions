@@ -8,7 +8,7 @@ export function buildSynthesisContext(records: readonly { unit: ReviewUnit; outp
   let summaryLength = 512;
   for (;;) {
     const context = encodeReviewData(records.map(({ unit, output }) => ({
-      unit: unit.id, paths: unit.files.map(file => file.path), summary: output.summary.slice(0, summaryLength),
+      unit: unit.id, ...(unit.chunkId === undefined ? {} : { chunk: unit.chunkId, boundaryPaths: unit.boundaryPaths ?? [], boundaryPathsTruncated: unit.boundaryPathsTruncated ?? false }), paths: unit.files.map(file => file.path), summary: output.summary.slice(0, summaryLength),
       summaryTruncated: output.summary.length > summaryLength,
     })));
     if (Buffer.byteLength(context) <= 48 * 1024) return context;

@@ -42,6 +42,33 @@ describe("content-sized frozen review planning", () => {
     expect(units[0]!.files.map(file => file.path)).toEqual(["src/entry.ts", "src/feature.ts", "tests/feature.test.ts"]);
     expect(units[1]!.files.map(file => file.path)).toEqual(["docs/unrelated.md"]);
   });
+  it("groups dependencies found only in frozen head source, not patch context", async () => {
+    const files = [file("entry/main.ts"), file("docs/unrelated.md"), file("lib/feature.ts"), file("tests/feature.test.ts")];
+    const git = vi.fn(async ({ args }: { args: string[] }) => result(args.includes("show") ?
+      (args.at(-1) === `${base.headSha}:entry/main.ts` ? "import { feature } from '../lib/feature.js';\nexport function main() { return feature(); }\n" : "export function feature() {}\n") : patch("+change\n")));
+    const units = await buildReviewPlan({ ...base, files, git });
+    expect(units[0]!.files.map(file => file.path)).toEqual(["entry/main.ts", "lib/feature.ts", "tests/feature.test.ts"]);
+    expect(JSON.parse(units[0]!.brief!).members[0].referencesWithinChunk).toEqual(["lib/feature.ts"]);
+    expect(git.mock.calls.filter(([call]) => call.args.includes("show"))).toHaveLength(files.length);
+  });
+  it("binds checkpoint identities to supporting frozen source even if the patch is unchanged", async () => {
+    let source = "export function guard() { return true; }";
+    const git = async ({ args }: { args: string[] }) => result(args.includes("show") ? source : patch("+change\n"));
+    const first = await buildReviewPlan({ ...base, files: [file()], git });
+    source = "export function guard() { return false; }";
+    const second = await buildReviewPlan({ ...base, files: [file()], git });
+    expect(second[0]!.context).toBe(first[0]!.context);
+    expect(second[0]!.id).not.toBe(first[0]!.id);
+  });
+  it("prefers declaration boundaries without losing changed lines or patch characters", () => {
+    const before = "+statement();\n".repeat(110);
+    const source = patch(before + "+export function next() {\n" + "+statement();\n".repeat(200) + "+}\n");
+    const slices = splitReviewPatch(file(), source, 3000);
+    expect(slices.map(slice => slice.patch).join("")).toBe(source);
+    expect(slices[1]!.patch.startsWith("+export function next()")).toBe(true);
+    expect(slices[1]!.startingHeadLine).toBe(120);
+    for (const slice of slices) expect(Buffer.byteLength(encodeReviewData([slice]))).toBeLessThanOrEqual(3000);
+  });
   it("includes empty, deletion-only and binary-metadata patches rather than silently filtering them", async () => {
     const files = [file("src/empty.ts"), { ...file("src/removed.ts"), isDeleted: true, status: "D" as const, rightSideRanges: [] }, file("assets/icon.png")];
     const git = vi.fn(async ({ args }: { args: string[] }) => result(args.at(-1)?.includes("empty") ? "" : args.at(-1)?.includes("removed") ? "@@ -1,1 +0,0 @@\n-old\n" : "Binary files differ\n"));
@@ -69,6 +96,6 @@ describe("content-sized frozen review planning", () => {
     const git = vi.fn(async ({ args }: { args: string[] }) => result(args.includes("rev-parse") ? (args.at(-1)!.startsWith(base.comparisonSha) ? "c".repeat(40) : "d".repeat(40)) : args.includes("--find-renames") ? "diff --git a/old b/new\ndiff --git a/old b/old\n" : patch("+renamed change\n")));
     const units = await buildReviewPlan({ ...base, files: [{ ...file(), previousPath: "old.ts", status: "R" }], git });
     expect(units[0]!.context).toContain("renamed change");
-    expect(git.mock.calls.at(-1)![0].args.slice(-2)).toEqual(["c".repeat(40), "d".repeat(40)]);
+    expect(git.mock.calls.find(([call]) => call.args.includes("diff") && !call.args.includes("--find-renames"))![0].args.slice(-2)).toEqual(["c".repeat(40), "d".repeat(40)]);
   });
 });
