@@ -48,7 +48,7 @@ export interface CodexRunnerOptions {
 }
 
 export interface ModelDiagnosticContext {
-  phase: "review" | "inspection" | "verification";
+  phase: "review" | "inspection" | "synthesis" | "verification";
   group?: number;
   groups?: number;
 }

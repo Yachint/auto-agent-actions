@@ -5,6 +5,7 @@ import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
 import { loadReviewBatchFiles } from "../../src/config/runtime.js";
 import { reviewPolicyHash } from "../../src/queue/policy.js";
 import type { CodexRunnerOptions } from "../../src/codex/runner.js";
+import { buildReviewPlan } from "../../src/repositories/review-plan.js";
 
 const files = Array.from({length:5},(_,i)=>({path:`file${i}.ts`,status:"M" as const,isDeleted:false,rightSideRanges:[{start:1,end:1}]}));
 const clean = {status:"completed" as const,blocked_reason:null,findings:[],summary:"Inspected the requested paths; no actionable defects found."};
@@ -17,6 +18,17 @@ function setup() {
 }
 
 describe("resumable sequential review",()=>{
+  it("requires every content slice before completion and does not cache an out-of-slice anchor",async()=>{
+    const s=setup();
+    const source="@@ -1,1 +1,10000 @@\n"+("+const value = 1;\n").repeat(10000);
+    const units=await buildReviewPlan({git:async()=>({stdout:Buffer.from(source),stderr:Buffer.alloc(0)}),worktreePath:"/snapshot",comparisonSha:"a".repeat(40),headSha:"b".repeat(40),files:[{...files[0]!,rightSideRanges:[{start:1,end:10000}]}],maxFiles:1});
+    const execute=vi.fn().mockResolvedValue(clean);
+    await runResumableReview({...s.options,files:[files[0]!],units,execute});
+    expect(execute).toHaveBeenCalledTimes(units.length);expect(s.data.size).toBe(units.length);
+    const t=setup();const outside=units[0]!.files[0]!.rightSideRanges.at(-1)!.end+1;
+    await expect(runResumableReview({...t.options,files:[files[0]!],units,execute:async()=>({...clean,findings:[{path:"file0.ts",title:"Defect",body:"Concrete defect",priority:1,confidence:0.95,start_line:outside,end_line:outside}]})})).rejects.toMatchObject({failureKind:"blocked"});
+    expect(t.data.size).toBe(0);
+  });
   it("prefills missing groups as untrusted data and reuses caches without rebuilding patches",async()=>{
     const s=setup();const groupContext=vi.fn(async()=>JSON.stringify([{path:"file0.ts",patchComplete:false,providedPatchLines:1,patch:"+partial"}]));
     const execute=vi.fn().mockResolvedValue(clean);

@@ -39,6 +39,7 @@ export interface AnalysisJobOptions {
   readonly agentThreads?: 1 | 2 | 3;
   readonly batchFiles?: number;
   readonly modelBudgetLimits?: import("../codex/model-budget.js").ModelBudgetLimits;
+  readonly reviewRunBudgetLimits?: import("../codex/model-budget.js").ReviewRunBudgetLimits;
 }
 
 export interface AnalysisJobDependencies {
@@ -223,6 +224,7 @@ export class AnalysisJobProcessor {
         ...(this.#options.agentThreads === undefined ? {} : { agentThreads: this.#options.agentThreads }),
         ...(this.#options.batchFiles === undefined ? {} : { batchFiles: this.#options.batchFiles }),
         ...(this.#options.modelBudgetLimits === undefined ? {} : { modelBudgetLimits: this.#options.modelBudgetLimits }),
+        ...(this.#options.reviewRunBudgetLimits === undefined ? {} : { reviewRunBudgetLimits: this.#options.reviewRunBudgetLimits }),
         ...(this.#dependencies.onModelDiagnostics === undefined ? {} : {
           onModelDiagnostics: (event) => this.#dependencies.onModelDiagnostics!(event, attemptId),
         }),

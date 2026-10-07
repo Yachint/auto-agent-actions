@@ -16,6 +16,17 @@ export const DEFAULT_MODEL_BUDGET: ModelBudgetLimits = Object.freeze({
   maxOutputTokens: 10_000,
 });
 
+export interface ReviewRunBudgetLimits {
+  readonly maxRequests: number;
+  readonly maxInputTokens: number;
+  readonly maxOutputTokens: number;
+}
+
+/** Explicit aggregate ceiling, independent of the per-inspection ceiling. */
+export const DEFAULT_REVIEW_RUN_BUDGET: ReviewRunBudgetLimits = Object.freeze({
+  maxRequests: 400, maxInputTokens: 4_000_000, maxOutputTokens: 100_000,
+});
+
 export type ModelBudgetReason = "request-count" | "invocation-request-count" | "request-size" |
   "input-tokens" | "output-tokens" | "unobserved-usage";
 
@@ -34,9 +45,9 @@ export class ReviewModelBudget {
   #totals = { requests: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   #turn: Promise<void> = Promise.resolve();
 
-  constructor(limits: ModelBudgetLimits = DEFAULT_MODEL_BUDGET) {
+  constructor(limits: ModelBudgetLimits = DEFAULT_MODEL_BUDGET, readonly parent?: ReviewModelBudget) {
     for (const [name, ceiling] of Object.entries({
-      maxRequests: 200, maxRequestsPerInvocation: 200,
+      maxRequests: 10_000, maxRequestsPerInvocation: 10_000,
       maxRequestBytes: 2 * 1024 * 1024,
       maxInputTokens: 10_000_000, maxOutputTokens: 1_000_000,
     })) {
@@ -47,9 +58,10 @@ export class ReviewModelBudget {
     this.limits = Object.freeze({ ...limits });
   }
 
-  get signal(): AbortSignal { return this.#controller.signal; }
-  failure(): ModelBudgetExceededError | undefined { return this.#failure; }
+  get signal(): AbortSignal { return this.parent === undefined ? this.#controller.signal : AbortSignal.any([this.#controller.signal, this.parent.signal]); }
+  failure(): ModelBudgetExceededError | undefined { return this.parent?.failure() ?? this.#failure; }
   totals(): CodexUsage & { requests: number } { return { ...this.#totals }; }
+  fork(limits: ModelBudgetLimits): ReviewModelBudget { return new ReviewModelBudget(limits, this); }
 
   deny(reason: ModelBudgetReason): ModelBudgetExceededError {
     this.#failure ??= new ModelBudgetExceededError(reason, this.totals());
@@ -64,25 +76,31 @@ export class ReviewModelBudget {
     }
     for (const name of ["inputTokens", "cachedInputTokens", "outputTokens"] as const)
       this.#totals[name] = Math.min(Number.MAX_SAFE_INTEGER, this.#totals[name] + usage[name]);
+    this.parent?.observe(usage);
     if (this.#totals.inputTokens > this.limits.maxInputTokens) this.deny("input-tokens");
     else if (this.#totals.outputTokens > this.limits.maxOutputTokens) this.deny("output-tokens");
   }
 
   invocation(): { acquire: () => Promise<() => void> } {
     let requests = 0;
+    const chain: ReviewModelBudget[] = [];
+    for (let budget: ReviewModelBudget | undefined = this; budget; budget = budget.parent) chain.push(budget);
+    const root = chain.at(-1)!;
     return { acquire: async () => {
-      const previous = this.#turn;
+      const previous = root.#turn;
       let release!: () => void;
-      this.#turn = new Promise<void>((resolve) => { release = resolve; });
+      root.#turn = new Promise<void>((resolve) => { release = resolve; });
       await previous;
       try {
-        if (this.#failure) throw this.#failure;
+        if (this.failure()) throw this.failure();
         if (requests >= this.limits.maxRequestsPerInvocation) throw this.deny("invocation-request-count");
-        if (this.#totals.requests >= this.limits.maxRequests) throw this.deny("request-count");
-        if (this.#totals.inputTokens >= this.limits.maxInputTokens) throw this.deny("input-tokens");
-        if (this.#totals.outputTokens >= this.limits.maxOutputTokens) throw this.deny("output-tokens");
+        for (const budget of chain) {
+          if (budget.#totals.requests >= budget.limits.maxRequests) throw budget.deny("request-count");
+          if (budget.#totals.inputTokens >= budget.limits.maxInputTokens) throw budget.deny("input-tokens");
+          if (budget.#totals.outputTokens >= budget.limits.maxOutputTokens) throw budget.deny("output-tokens");
+        }
         requests++;
-        this.#totals.requests++;
+        for (const budget of chain) budget.#totals.requests++;
         return release;
       } catch (error) { release(); throw error; }
     } };

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ReasoningEffort } from "../codex/runner.js";
-import { DEFAULT_MODEL_BUDGET, ReviewModelBudget, type ModelBudgetLimits } from "../codex/model-budget.js";
+import { DEFAULT_MODEL_BUDGET, DEFAULT_REVIEW_RUN_BUDGET, ReviewModelBudget, type ModelBudgetLimits, type ReviewRunBudgetLimits } from "../codex/model-budget.js";
 
 export interface WebhookServerConfig {
   readonly host: string;
@@ -44,6 +44,7 @@ export interface AnalysisWorkerConfig extends QueueRuntimeConfig {
   readonly agentThreads: 1 | 2 | 3;
   readonly batchFiles?: number;
   readonly modelBudgetLimits: ModelBudgetLimits;
+  readonly reviewRunBudgetLimits: ReviewRunBudgetLimits;
 }
 
 export interface PublisherWorkerConfig extends QueueRuntimeConfig {
@@ -135,6 +136,14 @@ export function loadModelBudgetLimits(source: NodeJS.ProcessEnv = process.env): 
   return new ReviewModelBudget(limits).limits;
 }
 
+export function loadReviewRunBudgetLimits(source: NodeJS.ProcessEnv = process.env): ReviewRunBudgetLimits {
+  return {
+    maxRequests: positiveInteger(source.REVIEW_MAX_PR_REQUESTS ?? String(DEFAULT_REVIEW_RUN_BUDGET.maxRequests), "REVIEW_MAX_PR_REQUESTS", 10_000),
+    maxInputTokens: positiveInteger(source.REVIEW_MAX_PR_INPUT_TOKENS ?? String(DEFAULT_REVIEW_RUN_BUDGET.maxInputTokens), "REVIEW_MAX_PR_INPUT_TOKENS", 10_000_000),
+    maxOutputTokens: positiveInteger(source.REVIEW_MAX_PR_OUTPUT_TOKENS ?? String(DEFAULT_REVIEW_RUN_BUDGET.maxOutputTokens), "REVIEW_MAX_PR_OUTPUT_TOKENS", 1_000_000),
+  };
+}
+
 export async function loadAnalysisWorkerConfig(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<AnalysisWorkerConfig> {
@@ -144,6 +153,7 @@ export async function loadAnalysisWorkerConfig(
     ...common,
     agentThreads: loadReviewAgentThreads(source),
     modelBudgetLimits: loadModelBudgetLimits(source),
+    reviewRunBudgetLimits: loadReviewRunBudgetLimits(source),
     ...(batchFiles === undefined ? {} : { batchFiles }),
     concurrency: positiveInteger(
       source.REVIEW_WORKER_CONCURRENCY ?? "1",

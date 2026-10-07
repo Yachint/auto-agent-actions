@@ -35,7 +35,7 @@ Review only the changes between the frozen comparison SHA and head SHA above. Us
 </exact_scope>
 
 <inspection_efficiency>
-Inspect the requested patch first, then only directly relevant surrounding ranges. Set max_output_tokens to 1000 on each exec_command; paginate narrow line ranges if necessary. Avoid whole-file dumps. Finish the structured review once the requested changed behavior and its direct guards/callers are understood. Preserve complete path coverage and the finding gate; never claim completion for paths that have not been inspected.
+Inspect the supplied patch slices first, then only directly relevant frozen surrounding ranges. Normally use max_output_tokens of 2000 on exec_command; batch related narrow reads to reduce model round trips and paginate only when needed. Avoid whole-file dumps and rereading supplied patches. Finish once the assigned changed behavior and its direct guards/callers are understood. Preserve complete assigned coverage and the finding gate; the parent records whole-path completion only after every assigned slice is inspected.
 </inspection_efficiency>
 
 <completion>

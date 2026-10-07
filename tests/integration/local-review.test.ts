@@ -18,7 +18,7 @@ import { runReviewCore } from "../../src/workflows/review-core.js";
 import { DiskReviewCheckpointStore } from "../../src/codex/review-checkpoints.js";
 import { ModelUsageLimitError } from "../../src/codex/model-limit.js";
 import type { CodexRunnerOptions } from "../../src/codex/runner.js";
-import { DEFAULT_MODEL_BUDGET, ModelBudgetExceededError } from "../../src/codex/model-budget.js";
+import { DEFAULT_MODEL_BUDGET, DEFAULT_REVIEW_RUN_BUDGET, ModelBudgetExceededError } from "../../src/codex/model-budget.js";
 
 const execFileAsync = promisify(execFile);
 let fixture: Awaited<ReturnType<typeof createRepositoryFixture>>;
@@ -32,6 +32,41 @@ afterAll(async () => {
 });
 
 describe("local review workflow", () => {
+  it("completes multiple independently budgeted units, integration and candidate verification in one run", async () => {
+    const multi=await createRepositoryFixture(true);
+    try {
+      const local=workflowOptions(multi);
+      const candidate={title:"Cross-component defect",body:"A concrete contract mismatch between changed modules.",priority:1 as const,confidence:0.95,path:"src/app.ts",start_line:2,end_line:2};
+      const phases:string[]=[];
+      const result=await runReviewCore({...local,repository:"example/project",remoteUrl:multi.sourcePath,baseBranch:"main",pullRequestNumber:7,expectedBaseSha:multi.baseSha,expectedHeadSha:multi.headSha,batchFiles:1,modelBudgetLimits:{...DEFAULT_MODEL_BUDGET,maxRequests:1},reviewRunBudgetLimits:{...DEFAULT_REVIEW_RUN_BUDGET,maxRequests:4}},{
+        checkpointStore:{read:async()=>undefined,write:async()=>{}},
+        runCodex:async invocation=>{
+          const phase=invocation.modelContext!.phase;phases.push(phase);
+          const release=await invocation.modelBudget!.invocation().acquire();
+          invocation.modelBudget!.observe({inputTokens:4,cachedInputTokens:0,outputTokens:1});release();
+          if(phase==="synthesis"){
+            expect(invocation.prompt).toContain("Untrusted inspection notes");
+            expect(invocation.expectedPaths).toEqual(["src/app.ts","src/other.ts"]);
+          }
+          return {status:"completed",blocked_reason:null,findings:phase==="inspection"?[]:[candidate],summary:phase==="synthesis"?"Cross-component contract checked.":"Assigned work completed."};
+        },
+      });
+      expect(phases).toEqual(["inspection","inspection","synthesis","verification"]);
+      expect(result.review.findings).toEqual([candidate]);
+      expect(result.review.summary).toContain("Cross-component contract checked");
+    }finally{await rm(multi.root,{recursive:true,force:true});}
+  });
+  it("does not return a completed review when the cross-component pass fails", async () => {
+    const multi=await createRepositoryFixture(true);
+    try{
+      const local=workflowOptions(multi);const phases:string[]=[];
+      await expect(runReviewCore({...local,repository:"example/project",remoteUrl:multi.sourcePath,baseBranch:"main",pullRequestNumber:7,expectedBaseSha:multi.baseSha,expectedHeadSha:multi.headSha,batchFiles:1},{
+        checkpointStore:{read:async()=>undefined,write:async()=>{}},
+        runCodex:async invocation=>{const phase=invocation.modelContext!.phase;phases.push(phase);if(phase==="synthesis")throw new Error("Integration incomplete");return {status:"completed",blocked_reason:null,findings:[],summary:"Assigned patch inspected."};},
+      })).rejects.toThrow("Integration incomplete");
+      expect(phases).toEqual(["inspection","inspection","synthesis"]);
+    }finally{await rm(multi.root,{recursive:true,force:true});}
+  });
   it("runs the complete pipeline and keeps only exact-diff findings", async () => {
     let worktreePath = "";
     let outputPath = "";
@@ -180,7 +215,7 @@ describe("local review workflow", () => {
     })).rejects.toThrow("verification introduced or changed a candidate");
   });
 
-  it("shares a budget with final verification and reuses completed inspection after a larger allowance", async () => {
+  it("charges independent inspection and verification units to the same PR ceiling and resumes validated checkpoints", async () => {
     const local = workflowOptions(fixture);
     const memory = new Map<string, string>();
     const checkpointStore = new DiskReviewCheckpointStore("/in-memory-checkpoints", {
@@ -193,6 +228,7 @@ describe("local review workflow", () => {
       ...local, repository: "example/project", remoteUrl: fixture.sourcePath, baseBranch: "main",
       pullRequestNumber: 7, expectedBaseSha: fixture.baseSha, expectedHeadSha: fixture.headSha,
       batchFiles: 1, modelBudgetLimits: { ...DEFAULT_MODEL_BUDGET, maxRequests: 1 },
+      reviewRunBudgetLimits: { ...DEFAULT_REVIEW_RUN_BUDGET, maxRequests: 1 },
     };
     let requests = 0;
     const phases: string[] = [];
@@ -206,7 +242,7 @@ describe("local review workflow", () => {
     };
     await expect(runReviewCore(options, { checkpointStore, runCodex })).rejects.toBeInstanceOf(ModelBudgetExceededError);
     expect(requests).toBe(1); expect(memory.size).toBe(1);
-    const result = await runReviewCore({ ...options, modelBudgetLimits: { ...DEFAULT_MODEL_BUDGET, maxRequests: 2 } }, { checkpointStore, runCodex });
+    const result = await runReviewCore({ ...options, reviewRunBudgetLimits: { ...DEFAULT_REVIEW_RUN_BUDGET, maxRequests: 2 } }, { checkpointStore, runCodex });
     expect(requests).toBe(2);
     expect(phases).toEqual(["inspection", "verification", "verification"]);
     expect(result.review.findings).toEqual([candidate]);
@@ -268,7 +304,7 @@ function workflowOptions(repositoryFixture: typeof fixture): {
   };
 }
 
-async function createRepositoryFixture(): Promise<{
+async function createRepositoryFixture(multi = false): Promise<{
   root: string;
   sourcePath: string;
   dataPath: string;
@@ -285,6 +321,7 @@ async function createRepositoryFixture(): Promise<{
   await git(sourcePath, ["config", "user.email", "test@example.com"]);
   await mkdir(path.join(sourcePath, "src"));
   await writeFile(path.join(sourcePath, "src/app.ts"), "one\ntwo\nthree\n");
+  if (multi) await writeFile(path.join(sourcePath, "src/other.ts"), "old\n");
   await git(sourcePath, ["add", "."]);
   await git(sourcePath, ["commit", "-m", "base"]);
   const baseSha = (await git(sourcePath, ["rev-parse", "HEAD"])).trim();
@@ -294,6 +331,7 @@ async function createRepositoryFixture(): Promise<{
     path.join(sourcePath, "src/app.ts"),
     "one\ntwo changed\nthree\n",
   );
+  if (multi) await writeFile(path.join(sourcePath, "src/other.ts"), "new\n");
   await git(sourcePath, ["add", "."]);
   await git(sourcePath, ["commit", "-m", "head"]);
   const headSha = (await git(sourcePath, ["rev-parse", "HEAD"])).trim();

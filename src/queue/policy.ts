@@ -1,4 +1,4 @@
-import { loadReviewIsolationConfig, loadReviewAgentThreads, loadReviewBatchFiles, loadModelBudgetLimits } from "../config/runtime.js";
+import { loadReviewIsolationConfig, loadReviewAgentThreads, loadReviewBatchFiles, loadModelBudgetLimits, loadReviewRunBudgetLimits } from "../config/runtime.js";
 import { buildReviewPrompt } from "../codex/prompt.js";
 import { buildCodexArgs } from "../codex/runner.js";
 import { createHash } from "node:crypto";
@@ -51,7 +51,7 @@ export function reviewPolicyHash(
         environment.REVIEW_MINIMUM_CONFIDENCE ?? "0.8",
         environment.REVIEW_MAXIMUM_INLINE_COMMENTS ?? "20",
         environment.REVIEW_BLOCKING_PRIORITY ?? "1",
-        ...(batchFiles === undefined ? [] : ["sequential-checkpoints-v1", batchFiles]),
+        ...(batchFiles === undefined ? [] : ["content-units-v2", batchFiles, loadReviewRunBudgetLimits(environment)]),
         "model-budget-v1", loadModelBudgetLimits(environment),
       ]),
     )

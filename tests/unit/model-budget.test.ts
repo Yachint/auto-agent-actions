@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_MODEL_BUDGET, ModelBudgetExceededError, ReviewModelBudget } from "../../src/codex/model-budget.js";
 import { createModelProxy } from "../../src/codex/model-proxy.js";
-import { loadModelBudgetLimits } from "../../src/config/runtime.js";
+import { loadModelBudgetLimits, loadReviewRunBudgetLimits } from "../../src/config/runtime.js";
 import { reviewPolicyHash } from "../../src/queue/policy.js";
 import { isTerminalInspectionFailure } from "../../src/workflows/analysis-failure.js";
 
@@ -14,6 +14,40 @@ const request = async (proxy: Awaited<ReturnType<typeof createModelProxy>>, inpu
 const setup = (budget: ReviewModelBudget, fetchUpstream = vi.fn<typeof fetch>().mockImplementation(async () => response()), onRequest = vi.fn()) => createModelProxy({ model, budget, fetch: fetchUpstream, onRequest, upstreamUrl: "https://chatgpt.com/backend-api/codex/responses", authorization: "Bearer private-credential", timeoutMs: 10000 });
 
 describe("parent-owned model budget", () => {
+  it("gives successive units independent caps while charging every response to the PR", async () => {
+    const parent = new ReviewModelBudget({ ...DEFAULT_MODEL_BUDGET, maxRequests: 3 });
+    const limits = { ...DEFAULT_MODEL_BUDGET, maxRequests: 2, maxInputTokens: 8 };
+    const upstream = vi.fn<typeof fetch>().mockImplementation(async () => response());
+    const first = await setup(parent.fork(limits), upstream);
+    await request(first); await request(first); await first.close();
+    const secondBudget = parent.fork(limits); const second = await setup(secondBudget, upstream);
+    try {
+      await request(second); await request(second);
+      expect(upstream).toHaveBeenCalledTimes(3);
+      expect(secondBudget.totals()).toMatchObject({ requests: 1, inputTokens: 4 });
+      expect(parent.totals()).toMatchObject({ requests: 3, inputTokens: 12 });
+      expect(secondBudget.failure()?.reason).toBe("request-count");
+    } finally { await second.close(); }
+  });
+  it("stops a stuck unit without secretly allocating a fresh allowance", async () => {
+    const parent = new ReviewModelBudget(); const child = parent.fork({ ...DEFAULT_MODEL_BUDGET, maxInputTokens: 3 });
+    const proxy = await setup(child);
+    try { await request(proxy).catch(() => {}); expect(child.signal.aborted).toBe(true); expect(child.failure()?.reason).toBe("input-tokens"); expect(parent.totals().inputTokens).toBe(4); }
+    finally { await proxy.close(); }
+  });
+  it("serializes admission across sibling units against the aggregate token ceiling", async () => {
+    const parent = new ReviewModelBudget({ ...DEFAULT_MODEL_BUDGET, maxInputTokens: 4 });
+    const first = parent.fork(DEFAULT_MODEL_BUDGET), second = parent.fork(DEFAULT_MODEL_BUDGET);
+    const release = await first.invocation().acquire(); const waiting = second.invocation().acquire();
+    first.observe({ inputTokens: 4, cachedInputTokens: 0, outputTokens: 1 }); release();
+    await expect(waiting).rejects.toMatchObject({ reason: "input-tokens" });
+    expect(parent.totals().requests).toBe(1); expect(second.signal.aborted).toBe(true);
+  });
+  it("validates explicit PR ceilings and includes them in staged scheduling policy", () => {
+    for (const key of ["REVIEW_MAX_PR_REQUESTS", "REVIEW_MAX_PR_INPUT_TOKENS", "REVIEW_MAX_PR_OUTPUT_TOKENS"])
+      for (const value of ["0", "-1", "1.5", "bad", "999999999"]) expect(() => loadReviewRunBudgetLimits({ [key]: value })).toThrow(key);
+    expect(reviewPolicyHash({ REVIEW_BATCH_FILES: "4" })).not.toBe(reviewPolicyHash({ REVIEW_BATCH_FILES: "4", REVIEW_MAX_PR_REQUESTS: "50" }));
+  });
   it("rejects excessive repeated context before forwarding it upstream", async () => {
     const budget = new ReviewModelBudget({ ...DEFAULT_MODEL_BUDGET, maxRequestBytes: 1024 });
     const upstream = vi.fn<typeof fetch>(); const proxy = await setup(budget, upstream);

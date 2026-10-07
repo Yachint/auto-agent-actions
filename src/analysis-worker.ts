@@ -80,6 +80,7 @@ const processor = new AnalysisJobProcessor(
     adaptiveEffort: config.adaptiveEffort,
     agentThreads: config.agentThreads,
     modelBudgetLimits: config.modelBudgetLimits,
+    reviewRunBudgetLimits: config.reviewRunBudgetLimits,
     ...(config.batchFiles === undefined ? {} : { batchFiles: config.batchFiles }),
     reasoningEffort: config.reasoningEffort,
     timeoutMs: config.timeoutMs,
