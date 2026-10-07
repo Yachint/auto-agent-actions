@@ -107,3 +107,21 @@ Stage responsibilities now distinguish local evidence-backed inspection, cross-c
 The complete VPS build/static-assets and all 298 tests passed using existing Docker images and dependencies, including Redis, Unix sockets, native isolation and fake-inference CLI boundaries. A read-only dry plan for frozen head `6fcb0fe15a6f50e843619152e1ec3cf6f3ff9312` and base `e67a18e46f3c17aeecf34f2db65187f7ec4008fe` represented all 125 current exact-diff paths / 1,193,506 raw patch bytes in 39 chunks / 77 units / 144 slices. Maximum chunk membership was four paths; maximum patch JSON was 24,520 bytes and maximum brief 6,076 bytes. Briefs totalled 289,765 bytes across invocations; planning took 1,430 ms without inference. These fresh exact-diff numbers supersede earlier recorded planner counts for acceptance accounting.
 
 This validates assignment and boundaries, not usage savings, model-review quality or completion. More units and added brief data can increase cost; only a complete monitored current-head run can establish whether reduced rediscovery offsets that overhead. The hourly continuation stays paused and analysis remains stopped during preparation. No local builds/tests, installations or Agenda edits occurred.
+
+## Contextual live acceptance — stopped at the owner’s ceiling
+
+The owner authorized a single manual run with a temporary 90% five-hour account ceiling. The PR advanced before inference to head `556967f7748a370eb08ae50d6919bb450a1a6b08`; the older queued scope was discarded without model calls. One model attempt completed 41 of 77 contextual inspections, preserving 34,700 bytes of validated mode-protected checkpoints and four unverified candidate records. Integration, independent candidate verification and successful publication did not complete.
+
+| Measurement | Result |
+| --- | ---: |
+| Initial account usage / stop request / meter after shutdown | 23% / 90% / 91% |
+| Requests | 167 |
+| Observed gross / cached input | 2,323,481 / 178,560 tokens (7.7%) |
+| Observed output | 27,394 tokens |
+| Completed / required inspections | 41 / 77 |
+
+One final inspection completed during shutdown. Account percentages include this chat and all shared-account activity; they are not an isolated reviewer-cost attribution. The account monitor polled more frequently near the ceiling. An early monitoring timeout incorrectly triggered a stop request, which automatic approval review rejected because the meter was below the ceiling and no review failure had been established. The worker was not interrupted; the watcher was corrected to handle slow SSH responses and the same model attempt continued. No operator resume loop or source/configuration change occurred during inference.
+
+The actual stop surfaced as a timeout and left an inactive automatic retry. The exact stopped scope was explicitly exhausted and that retry removed, preserving all completed checkpoints and leaving zero active jobs. Analysis is stopped, application/publisher remain running, and the hourly continuation remains paused. GitHub metadata showed no successful review submitted by this run. Partial candidate records cannot be reported as verified findings.
+
+The contextual design remains insufficient to establish affordable completion for this PR in the tested allowance. Gross input and supporting-read round trips remain high, and observed cache reuse remains low. Those measurements justify further investigation; they do not prove a cache implementation defect or a measured savings regression against a different frozen head/unit plan. Do not restart this unchanged exhausted scope as a substitute for a cost fix.
