@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -9,17 +9,17 @@ COPY scripts ./scripts
 COPY src ./src
 RUN npm run build
 
-FROM node:24-bookworm-slim AS sandbox-build
+FROM node:26-bookworm-slim AS sandbox-build
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev linux-libc-dev
 COPY native/review-sandbox.c /tmp/review-sandbox.c
 RUN gcc -O2 -Wall -Wextra -Werror /tmp/review-sandbox.c -o /tmp/review-sandbox
 
-FROM node:24-bookworm-slim AS production-dependencies
+FROM node:26-bookworm-slim AS production-dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-FROM node:24-bookworm-slim AS app-runtime
+FROM node:26-bookworm-slim AS app-runtime
 ARG APP_UID=1000
 ARG APP_GID=1000
 ENV NODE_ENV=production
